@@ -135,11 +135,16 @@ export function checkList(checks: Check[]): HTMLElement {
  */
 export function showTxError(net: NetConfig, status: HTMLElement, e: unknown) {
   status.textContent = errorText(e);
-  if (!(e instanceof TxBlocked && e.canForget)) return;
+  if (!(e instanceof TxBlocked && e.forgettable)) return;
+  const requestId = e.forgettable;
   const forget = h("button", { type: "button", class: "ghost small" }, "I've checked my wallet: forget it");
-  forget.addEventListener("click", () => {
-    forgetEarlierTransaction(net);
-    status.textContent = "Forgotten. You can try again.";
+  forget.addEventListener("click", async () => {
+    try {
+      await forgetEarlierTransaction(net, requestId);
+      status.textContent = "Forgotten. You can try again.";
+    } catch (err) {
+      status.textContent = errorText(err);
+    }
   });
   status.append(" ", forget);
 }

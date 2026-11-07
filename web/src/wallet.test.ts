@@ -118,12 +118,12 @@ describe("submit", () => {
     const w = fakeWallet({ status: (id) => (id === "req1" ? { status: "submitting", expiresAt: 0 } : { status: "submitted", result: accept }) });
     const first = errOf(await run(w));
     expect(first).toBeInstanceOf(TxBlocked);
-    expect((first as TxBlocked).canForget).toBe(true);
+    expect((first as TxBlocked).forgettable).toBe("req1");
     expect(store.get(KEY)).toBe("req1");
     // Still blocked on the next attempt, without creating anything new.
     expect(errOf(await run(w))).toBeInstanceOf(TxBlocked);
     expect(w.creates()).toBe(1);
-    forgetEarlierTransaction(net);
+    await forgetEarlierTransaction(net, "req1");
     expect(await run(w)).toEqual({ ok: accept });
     expect(w.creates()).toBe(2);
   });
@@ -134,7 +134,7 @@ describe("submit", () => {
     const w = fakeWallet({
       status: (id) => {
         if (!up) throw new Error("wallet unreachable");
-        return id === "old" ? { status: "failed", error: "boom" } : { status: "submitted", result: accept };
+        return id === "old" ? { status: "rejected" } : { status: "submitted", result: accept };
       },
     });
     expect(errOf(await run(w))?.message).toContain("Lost contact");
@@ -143,6 +143,31 @@ describe("submit", () => {
     up = true; // the old one never executed, so the next attempt goes ahead
     expect(await run(w)).toEqual({ ok: accept });
     expect(w.creates()).toBe(1);
+  });
+
+  // The wallet records "failed" for errors after broadcast too, so it doesn't prove nothing ran.
+  it("treats a wallet failure as an unknown outcome, saved or new", async () => {
+    store.set(KEY, "old");
+    const w = fakeWallet({ status: (id) => (id === "old" ? { status: "failed", error: "result lookup failed" } : { status: "failed" }) });
+    const saved = errOf(await run(w));
+    expect((saved as TxBlocked).forgettable).toBe("old");
+    expect(w.creates()).toBe(0);
+    await forgetEarlierTransaction(net, "old");
+    const fresh = errOf(await run(w));
+    expect((fresh as TxBlocked).forgettable).toBe("req1");
+    expect(store.get(KEY)).toBe("req1");
+  });
+
+  it("forgets only the exact request, and never while a transaction is running", async () => {
+    store.set(KEY, "B");
+    await forgetEarlierTransaction(net, "A"); // a stale button from an older error
+    expect(store.get(KEY)).toBe("B");
+    let release!: () => void;
+    const running = navigator.locks.request("lockbox-tx-esmeralda", {}, () => new Promise<void>((r) => (release = r)));
+    await expect(forgetEarlierTransaction(net, "B")).rejects.toThrow("Another");
+    expect(store.get(KEY)).toBe("B");
+    release();
+    await running;
   });
 
   it("shows that a saved request went through instead of starting a new one", async () => {

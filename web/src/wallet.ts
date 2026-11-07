@@ -134,16 +134,21 @@ export async function dryRun(p: TariProvider, instructions: Instruction[]): Prom
  * Transaction tracking. A lock can't be undone, so the page must never start a second lock while
  * an earlier one might still execute. Rules:
  *  - one transaction at a time per network, across tabs (Web Locks);
- *  - the request id is saved before anything can execute and cleared only on a final status
- *    (submitted, rejected, failed) or when the user deliberately forgets it;
+ *  - the request id is saved before anything can execute and cleared only when it is known how it
+ *    ended (submitted; rejected by the user; expired unapproved) or when the user deliberately
+ *    forgets that exact request. A wallet "failed" is not proof: the wallet may have broadcast
+ *    the transaction before failing to read its result;
  *  - a saved request is followed to its outcome (submitted if approved) before any new one, and
  *    the click that settles it never starts a new transaction;
  *  - every wallet call has a deadline; a timeout keeps the id and reports an unknown outcome.
  */
 
-/** A transaction can't start yet. `canForget`: the user may check their wallet and forget the earlier one. */
+/**
+ * A transaction can't start yet. With `forgettable` set, the user may check their wallet history
+ * and then forget exactly that request (`forgetEarlierTransaction`).
+ */
 export class TxBlocked extends Error {
-  constructor(message: string, readonly canForget: boolean) {
+  constructor(message: string, readonly forgettable: string | null = null) {
     super(message);
   }
 }
@@ -157,8 +162,7 @@ const MAX_FAILURES = 5;
 const pendingKey = (net: NetConfig) => `lockbox.pending.${net.name}`;
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-const UNKNOWN =
-  "The outcome of an earlier Lockbox transaction from this browser is unknown. Check your wallet's history: if it went through, don't repeat it.";
+const UNKNOWN = "Its outcome is unknown. Check your wallet's history: if it went through, don't repeat it.";
 
 /** A wallet call that fails instead of hanging. */
 function rpc(p: TariProvider, method: string, params: unknown, ms = RPC_TIMEOUT_MS): Promise<any> {
@@ -180,12 +184,19 @@ function clearSaved(net: NetConfig, requestId: string) {
   if (localStorage.getItem(pendingKey(net)) === requestId) localStorage.removeItem(pendingKey(net));
 }
 
-/** For the "I've checked my wallet" action after a TxBlocked with canForget. */
-export function forgetEarlierTransaction(net: NetConfig) {
-  localStorage.removeItem(pendingKey(net));
+/**
+ * The "I've checked my wallet" action: forgets `requestId` if it is still the saved one. Runs
+ * under the transaction lock, so it can't touch a transaction another tab is running.
+ */
+export async function forgetEarlierTransaction(net: NetConfig, requestId: string): Promise<void> {
+  await exclusive(net, async () => clearSaved(net, requestId));
 }
 
-type Outcome = { status: "submitted"; result: unknown } | { status: "rejected" | "failed"; error: string };
+/** How a request ended. `unknown`: the wallet reported a failure, which may be after broadcast. */
+type Outcome =
+  | { status: "submitted"; result: unknown }
+  | { status: "not-run"; error: string }
+  | { status: "unknown"; error: string };
 
 /**
  * Follows one request to a final outcome, submitting it once approved (the wallet runs at most one
@@ -193,6 +204,7 @@ type Outcome = { status: "submitted"; result: unknown } | { status: "rejected" |
  * id still saved, when the wallet stops answering or the request stays stuck.
  */
 async function follow(p: TariProvider, requestId: string, onStatus: (s: string) => void): Promise<Outcome> {
+  const blocked = (why: string) => new TxBlocked(`${why} ${UNKNOWN}`, requestId);
   let pollFailures = 0; // consecutive: reset by any answer
   let submitFailures = 0;
   let stuckSince: number | null = null;
@@ -201,30 +213,31 @@ async function follow(p: TariProvider, requestId: string, onStatus: (s: string) 
     try {
       r = await rpc(p, "tari_getTransactionRequest", { requestId });
     } catch {
-      if (++pollFailures >= MAX_FAILURES) throw new TxBlocked(`Lost contact with your wallet. ${UNKNOWN}`, true);
+      if (++pollFailures >= MAX_FAILURES) throw blocked("Lost contact with your wallet.");
       await sleep(1500);
       continue;
     }
     pollFailures = 0;
     if (r.status === "submitted") return { status: "submitted", result: r.result };
-    if (r.status === "rejected" || r.status === "failed") return { status: r.status, error: r.error ?? `Transaction ${r.status}.` };
+    if (r.status === "rejected") return { status: "not-run", error: r.error ?? "You rejected the transaction." };
+    if (r.status === "failed") return { status: "unknown", error: r.error ?? "The wallet reported a failure." };
     if (r.status === "pending") {
       stuckSince = null;
       // Sapient never runs a request whose approval window expired.
-      if (typeof r.expiresAt === "number" && Date.now() > r.expiresAt) return { status: "failed", error: "The request expired in your wallet." };
+      if (typeof r.expiresAt === "number" && Date.now() > r.expiresAt) return { status: "not-run", error: "The request expired in your wallet." };
       onStatus("Waiting for approval in your wallet...");
       await sleep(800);
       continue;
     }
     stuckSince ??= Date.now();
-    if (Date.now() - stuckSince > STUCK_LIMIT_MS) throw new TxBlocked(`Your wallet has been submitting for a long time. ${UNKNOWN}`, true);
+    if (Date.now() - stuckSince > STUCK_LIMIT_MS) throw blocked("Your wallet has been submitting for a long time.");
     onStatus("Submitting...");
     if (r.status === "approved") {
       try {
         return { status: "submitted", result: await rpc(p, "tari_submitTransactionRequest", { requestId }, SUBMIT_TIMEOUT_MS) };
       } catch {
         // Failed (the next poll says so) or the response was lost (the next poll shows progress).
-        if (++submitFailures >= MAX_FAILURES) throw new TxBlocked(`Lost contact with your wallet while submitting. ${UNKNOWN}`, true);
+        if (++submitFailures >= MAX_FAILURES) throw blocked("Lost contact with your wallet while submitting.");
       }
     }
     await sleep(1500);
@@ -246,14 +259,14 @@ async function settleSaved(p: TariProvider, net: NetConfig, onStatus: (s: string
   if (!id) return;
   onStatus("Checking an earlier transaction from this browser...");
   const out = await follow(p, id, onStatus);
+  if (out.status === "unknown") throw new TxBlocked(`An earlier Lockbox transaction failed in your wallet (${out.error}). ${UNKNOWN}`, id);
   clearSaved(net, id);
-  if (out.status !== "submitted") return; // never executed: safe to go on
+  if (out.status === "not-run") return; // never executed: safe to go on
   const rejected = rejectionText(out.result);
   throw new TxBlocked(
     rejected
       ? `An earlier Lockbox transaction from this browser was rejected by the network (${rejected}). Press again to continue.`
       : "An earlier Lockbox transaction from this browser went through. Check your locks and wallet history before doing this again; press again to continue.",
-    false,
   );
 }
 
@@ -261,7 +274,7 @@ async function settleSaved(p: TariProvider, net: NetConfig, onStatus: (s: string
 async function exclusive<T>(net: NetConfig, fn: () => Promise<T>): Promise<T> {
   if (!navigator.locks) throw new Error("This browser can't track transactions safely. Use lockbox-cli instead.");
   return navigator.locks.request(`lockbox-tx-${net.name}`, { ifAvailable: true }, async (lock) => {
-    if (!lock) throw new TxBlocked("Another Lockbox tab or action is running a transaction. Finish it there first.", false);
+    if (!lock) throw new TxBlocked("Another Lockbox tab or action is running a transaction. Finish it there first.");
     return fn();
   });
 }
@@ -289,8 +302,9 @@ export async function submit(
     // A reload before this line leaves an approval popup nobody will submit, so it can't execute.
     localStorage.setItem(pendingKey(net), requestId);
     const out = await follow(p, requestId, onStatus);
+    if (out.status === "unknown") throw new TxBlocked(`Your wallet reported a failure (${out.error}), possibly after sending the transaction. ${UNKNOWN}`, requestId);
     clearSaved(net, requestId);
-    if (out.status !== "submitted") throw new Error(out.error);
+    if (out.status === "not-run") throw new Error(out.error);
     const rejected = rejectionText(out.result);
     if (rejected) throw new Error(`The network rejected the transaction: ${rejected}`);
     return out.result;
