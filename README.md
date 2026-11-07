@@ -13,8 +13,10 @@ freeze or block withdrawals, and a resource owner can bypass those rules. Lockbo
 from inside the engine, so it can't refuse such tokens. Recall is off and locked by default when a token is
 created, but always check: the Lockbox web app reads each resource's rules from the indexer and marks a lock
 verified only when the resource has no owner, recall is denied and locked, withdraw and deposit are open and
-locked, and there is no auth hook. Verifiers should also check that the lock component was created from the
-Lockbox template address, since any template can emit an event with the same name.
+locked, and there is no auth hook. Verifiers should also check that the lock
+component runs the Lockbox template address **and** has no owner and a `Locked` upgrade rule: any template can emit
+an event with the same name, and a component whose upgrade rule allows it can be switched into the Lockbox template
+with fake state. Lockbox components are always created ownerless and non-upgradable, so genuine locks pass.
 
 Accepts public fungible tokens, NFTs and the LP tokens of Ootle's built-in liquidity pools. Buckets holding blinded
 confidential commitments are refused, since a claim could not move them.
@@ -29,6 +31,36 @@ cargo build-wasm    # target/wasm32-unknown-unknown/release/ootle_lockbox.wasm
 
 Built against `tari_template_lib` 0.38 (Ootle v0.50.1). Rebuild and republish after any network upgrade that
 bumps the template library.
+
+## Web app
+
+`web/` is a static site (Vite + TypeScript) that reads the public indexer and signs with the
+[Sapient](https://github.com/chironbuilds/tari-wallet) wallet extension. Pages: recent locks, a proof page per lock
+(`#/<network>/lock/<component>`), a token page with its issuer's powers and locked share
+(`#/<network>/token/<resource>`), and lock creation and claiming. The verification rules live in `web/src/verify.ts`
+and are tested against real Esmeralda data.
+
+```bash
+cd web
+pnpm install
+pnpm test           # verifier tests
+pnpm dev            # local dev server
+pnpm build          # static site in web/dist
+```
+
+Every push to `main` deploys the site to GitHub Pages (`.github/workflows/pages.yml`).
+
+## Command line
+
+`cli/` holds `lockbox-cli`, which publishes the template and locks or claims from a local key:
+`lockbox-cli <esmeralda|mainnet> <init|address|status|publish|lock|claim> [args] [--submit]`.
+
+## Deployments
+
+| Network | Lockbox template |
+|---|---|
+| Esmeralda testnet | `template_d7f5ee289465580308d3074a0892d90eefb4bf157200171692bdf47cc9473832` |
+| Mainnet | published on 11 Nov 2026 (address added here) |
 
 ## Licence
 

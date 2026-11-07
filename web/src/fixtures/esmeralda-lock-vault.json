@@ -1,0 +1,12 @@
+{
+ "Vault": {
+  "resource_container": {
+   "Stealth": {
+    "address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+    "revealed_amount": "0",
+    "locked_amount": "0"
+   }
+  },
+  "freeze_flags": 0
+ }
+}

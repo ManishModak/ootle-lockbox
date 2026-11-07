@@ -1,0 +1,22 @@
+{
+  "name": "lockbox-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tari-project/ootle": "0.14.0",
+    "@tari-project/ootle-indexer": "0.14.0",
+    "@tari-project/ootle-wasm": "0.50.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,51 @@
+{
+ "Component": {
+  "header": {
+   "template_address": "d7f5ee289465580308d3074a0892d90eefb4bf157200171692bdf47cc9473832",
+   "owner_rule": "None",
+   "access_rules": {
+    "method_access": {
+     "claim": {
+      "Restricted": {
+       "Require": {
+        "Require": {
+         "NonFungibleAddress": {
+          "resource_address": "resource_0100000000000000000000000000000000000000000000000000000000000000",
+          "id": {
+           "U256": "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017"
+          }
+         }
+        }
+       }
+      }
+     },
+     "info": "AllowAll"
+    },
+    "default": "DenyAll"
+   },
+   "entity_id": "c5",
+   "upgrade_rule": "Locked"
+  },
+  "body": {
+   "state": [
+    {
+     "@cbor": "tag",
+     "tag": 132,
+     "value": {
+      "@cbor": "bytes",
+      "hex": "c5f672cbfd572ba9cbaa1350984dd764a8045fcb098ac07efefa295a79453786"
+     }
+    },
+    {
+     "@cbor": "bytes",
+     "hex": "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017"
+    },
+    12932,
+    12931,
+    1000000,
+    "lockbox-cli demo",
+    true
+   ]
+  }
+ }
+}
