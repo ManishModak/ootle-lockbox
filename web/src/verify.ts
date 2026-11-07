@@ -79,6 +79,9 @@ function cborHex(x: Json): string | null {
 
 const HEX64 = /^[0-9a-f]{64}$/;
 
+/** The engine's virtual resource whose NFT ids are public keys: `Require(this badge)` = "signed by this key". */
+export const PUBLIC_KEY_BADGE_RESOURCE = "resource_0100000000000000000000000000000000000000000000000000000000000000";
+
 /** Reads the component's header and state. Unknown shapes fail closed (genuine = false). */
 export function readLock(value: Json, lockboxTemplate: string): LockReading {
   const checks: Check[] = [];
@@ -139,7 +142,7 @@ function parseState(body: Json): LockState | null {
   };
 }
 
-/** `claim` must require exactly the beneficiary's public-key badge; `default` must deny. */
+/** `claim` must require exactly the beneficiary's public-key badge; `default` must deny. Anything else fails. */
 function claimRuleBindsTo(rules: Json, beneficiary: string): boolean {
   if (!isObj(rules) || rules.default !== "DenyAll" || !isObj(rules.method_access)) return false;
   const methods = rules.method_access;
@@ -150,16 +153,20 @@ function claimRuleBindsTo(rules: Json, beneficiary: string): boolean {
     isObj(r) && isObj(r.Restricted) && isObj(r.Restricted.Require) && isObj(r.Restricted.Require.Require)
       ? r.Restricted.Require.Require.NonFungibleAddress
       : null;
-  const id = isObj(nf) && isObj(nf.id) ? nf.id.U256 : null;
-  return typeof id === "string" && id.toLowerCase() === beneficiary;
+  if (!isObj(nf) || nf.resource_address !== PUBLIC_KEY_BADGE_RESOURCE || !isObj(nf.id)) return false;
+  return typeof nf.id.U256 === "string" && nf.id.U256.toLowerCase() === beneficiary;
 }
 
-/** Live balance of a vault substate (Fungible, Stealth, Confidential revealed part, or NFT). */
+/**
+ * Live balance of a vault substate (Fungible, Stealth or Confidential revealed part, or NFT).
+ * Any other container shape returns null, which pages show as "unable to verify".
+ */
 export function readVault(value: Json): VaultBalance | null {
   const v = isObj(value) && isObj(value.Vault) ? value.Vault : null;
   const rc = v && isObj(v.resource_container) ? v.resource_container : null;
-  if (!rc) return null;
-  const [kind, inner] = Object.entries(rc)[0] ?? [];
+  if (!rc || Object.keys(rc).length !== 1) return null;
+  const [kind, inner] = Object.entries(rc)[0];
+  if (!["Fungible", "Stealth", "Confidential", "NonFungible"].includes(kind)) return null;
   if (!isObj(inner) || typeof inner.address !== "string") return null;
   if (kind === "NonFungible") {
     const ids = inner.token_ids;
@@ -188,7 +195,8 @@ export function readResource(value: Json): ResourceReading | null {
   if (!fixed("freeze", "DenyAll")) lockRisks.push("The issuer can freeze vaults, including a lock's vault.");
   if (!fixed("withdraw", "AllowAll")) lockRisks.push("Withdrawals are restricted, so a claim could be blocked.");
   if (!fixed("deposit", "AllowAll")) lockRisks.push("Deposits are restricted, so claimed tokens could be refused.");
-  if (r.auth_hook !== null && r.auth_hook !== undefined) lockRisks.push("A hook contract can veto transfers.");
+  if (!("auth_hook" in r)) lockRisks.push("The token's transfer-hook setting could not be read.");
+  else if (r.auth_hook !== null) lockRisks.push("A hook contract can veto transfers.");
   else if (!locked(rules.auth_hook_updater)) lockRisks.push("A transfer hook can still be added later.");
 
   const notes: string[] = [];

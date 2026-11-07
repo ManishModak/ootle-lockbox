@@ -62,6 +62,14 @@ describe("readLock", () => {
     expect(readLock(fake, TEMPLATE).genuine).toBe(false);
   });
 
+  // A key-shaped badge from some other resource is not a signature requirement.
+  it("rejects a claim badge from a resource other than the public-key badge", () => {
+    const fake = clone(lockFixture);
+    const nf = (fake.Component.header.access_rules.method_access as any).claim.Restricted.Require.Require.NonFungibleAddress;
+    nf.resource_address = "resource_" + "02".repeat(32);
+    expect(readLock(fake, TEMPLATE).genuine).toBe(false);
+  });
+
   it("fails closed on unreadable state", () => {
     const fake = clone(lockFixture);
     fake.Component.body.state = fake.Component.body.state.slice(0, 5);
@@ -84,6 +92,12 @@ describe("readVault", () => {
   it("reads a fungible vault", () => {
     const v = { Vault: { resource_container: { Fungible: { address: "resource_aa", amount: 42, locked_amount: 0 } } } };
     expect(readVault(v)?.amount).toBe(42n);
+  });
+
+  it("returns null for an unknown container kind or several kinds", () => {
+    expect(readVault({ Vault: { resource_container: { Wrapped: { address: "resource_aa", revealed_amount: 5 } } } })).toBeNull();
+    const two = { Fungible: { address: "resource_aa", amount: 1 }, Stealth: { address: "resource_aa", revealed_amount: 1 } };
+    expect(readVault({ Vault: { resource_container: two } })).toBeNull();
   });
 });
 
@@ -120,6 +134,12 @@ describe("readResource", () => {
     expect(risks.some((x) => x.includes("veto"))).toBe(true);
     // freeze_updater Owner with no owner is unreachable, so not a risk.
     expect(risks.some((x) => x.includes("freeze"))).toBe(false);
+  });
+
+  it("treats a missing hook field as a risk, not as no hook", () => {
+    const noField = clone(tariFixture) as { Resource: Record<string, unknown> };
+    delete noField.Resource.auth_hook;
+    expect(readResource(noField)?.lockRisks.some((x) => x.includes("hook"))).toBe(true);
   });
 
   it("notes mintable supply without calling it a lock risk", () => {

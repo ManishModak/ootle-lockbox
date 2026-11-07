@@ -54,11 +54,12 @@ export interface LockEvent {
 
 /**
  * `Lockbox.LockCreated` events emitted by the pinned template, newest first. Any template can emit
- * an event with this topic, so events from other templates are dropped here.
+ * an event with this topic, so events from other templates are dropped here. `complete` is false
+ * when `maxPages` ran out before the oldest event.
  */
-export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<LockEvent[]> {
+export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{ events: LockEvent[]; complete: boolean }> {
   const template = net.lockboxTemplate;
-  if (!template) return [];
+  if (!template) return { events: [], complete: true };
   const out: LockEvent[] = [];
   const seen = new Set<string>();
   let before: number | undefined;
@@ -86,8 +87,8 @@ export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<L
         unlockEpoch: Number(p.unlock_epoch),
       });
     }
-    if (typeof r.next_before_id !== "number" || (r.events ?? []).length < 100) break;
+    if (typeof r.next_before_id !== "number" || (r.events ?? []).length < 100) return { events: out, complete: true };
     before = r.next_before_id;
   }
-  return out;
+  return { events: out, complete: false };
 }

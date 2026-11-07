@@ -6,7 +6,9 @@ import { addressLine, errorText, h, link, loading, notice, pill } from "../ui";
 import { formatAmount, lockedShare, readResource } from "../verify";
 import { checkList } from "./lock";
 
-const MAX_LOCKS = 50;
+// Upper bounds on reads per page view; past them the total is shown as a lower bound.
+const MAX_EVENT_PAGES = 20;
+const MAX_LOCKS = 200;
 
 export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / token"), loading());
@@ -44,18 +46,28 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
 
     const section = h("section", {}, h("h2", {}, "Locks of this token"), loading("Looking for locks…"));
     root.append(section);
-    const events = (await lockCreatedEvents(net)).filter((e) => e.resource === id).slice(0, MAX_LOCKS);
-    const locks = await mapLimit(events, 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
+    const found = await lockCreatedEvents(net, MAX_EVENT_PAGES);
+    const mine = found.events.filter((e) => e.resource === id);
+    const events = mine.slice(0, MAX_LOCKS);
+    const loaded = await mapLimit(events, 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
+    const locks = loaded.filter((x): x is LoadedLock => x !== null);
+    const failed = loaded.length - locks.length;
+    const complete = found.complete && mine.length === events.length && failed === 0;
     section.lastElementChild?.remove();
-    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), r.divisibility, r.totalSupply, epoch));
-    if (events.length === MAX_LOCKS) section.append(h("p", { class: "muted small" }, `Showing the first ${MAX_LOCKS} locks.`));
+    section.append(lockTable(net, locks, r.divisibility, r.totalSupply, epoch, complete));
+    const gaps = [
+      !found.complete || mine.length > events.length ? `Only the newest ${events.length} locks were read.` : "",
+      failed ? `${failed} lock(s) could not be read.` : "",
+    ].filter(Boolean);
+    if (gaps.length) section.append(notice("warn", `${gaps.join(" ")} The locked total is at least the amount shown.`));
     section.append(h("p", { class: "muted small" }, `Read from ${indexerHost(net)} at epoch ${epoch}.`));
   } catch (e) {
     root.lastElementChild?.replaceWith(notice("bad", `Could not load this token: ${errorText(e)}`));
   }
 }
 
-export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | null, supply: bigint | null, epoch: number): HTMLElement {
+/** Locks as a table, with the still-locked total. `complete` = every lock of the token was read. */
+export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | null, supply: bigint | null, epoch: number, complete: boolean): HTMLElement {
   if (locks.length === 0) return h("p", { class: "muted" }, "No Lockbox locks found yet.");
   // Only genuine locks still before their unlock epoch count as locked supply.
   const lockedNow = locks
@@ -88,9 +100,10 @@ export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | nul
       ? h(
           "p",
           {},
+          complete ? "" : "At least ",
           h("strong", {}, `${formatAmount(lockedNow, div)} ${locks.find((l) => l.resource?.symbol)?.resource?.symbol ?? ""}`.trim()),
           " still locked",
-          share ? ` (${share} of supply)` : supply === null ? " (supply not tracked, so no share)" : "",
+          share ? ` (${complete ? "" : "at least "}${share} of supply)` : supply === null ? " (supply not tracked, so no share)" : "",
           ". Counts only genuine locks before their unlock epoch.",
         )
       : null,

@@ -83,7 +83,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
       h(
         "p",
         { class: "muted small" },
-        "Epochs, not dates, decide when a lock opens. Epochs last roughly 32–48 minutes, so dates shown here are estimates. Locks hold public token balances; private TARI must be made public in your wallet first. ",
+        "Epochs, not dates, decide when a lock opens. Epoch length varies, so dates shown here are estimates; a new lock is set so it can't open before the time you pick. Locks hold public token balances; private TARI must be made public in your wallet first. ",
         h("a", { href: REPO_URL }, "Source code (MIT)"),
         ".",
       ),
@@ -93,10 +93,10 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
 
 async function loadRecent(net: NetConfig, section: HTMLElement) {
   try {
-    const [epoch, events] = await Promise.all([currentEpoch(net), lockCreatedEvents(net, 2)]);
+    const [epoch, { events }] = await Promise.all([currentEpoch(net), lockCreatedEvents(net, 2)]);
     const locks = await mapLimit(events.slice(0, RECENT), 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
     section.lastElementChild?.remove();
-    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), null, null, epoch));
+    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), null, null, epoch, true));
   } catch (e) {
     section.lastElementChild?.replaceWith(notice("warn", `Could not load recent locks: ${errorText(e)}`));
   }

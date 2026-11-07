@@ -2,16 +2,14 @@
  * Create a lock with the Sapient wallet: pick a token, amount, unlock time and beneficiary, review
  * the token's rules, dry-run, then sign. Ends on the new lock's proof page.
  */
-import { parseOotleAddress } from "@tari-project/ootle-wasm";
-import { MAX_MEMO_BYTES, MIN_MINUTES_PER_EPOCH, REPO_URL, type NetConfig } from "../config";
+import { MAX_MEMO_BYTES, REPO_URL, type NetConfig } from "../config";
 import { currentEpoch, getSubstate } from "../indexer";
+import { isValidPublicKey, lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
 import { errorText, epochsAsDuration, estimatedDate, h, link, notice } from "../ui";
 import { formatAmount, parseAmount, readLock, readResource } from "../verify";
 import { balances, connect, dryRun, getProvider, lockInstructions, submit, walletNetwork, type Balance } from "../wallet";
 import { checkList } from "./lock";
 import { notPublishedNotice } from "./home";
-
-const NETWORK_BYTE: Record<string, number> = { esmeralda: 38, mainnet: 0 };
 
 export async function createView(net: NetConfig, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / create"), h("h1", {}, "Create a lock"));
@@ -41,7 +39,7 @@ export async function createView(net: NetConfig, root: HTMLElement) {
       const account = await connect(p);
       const [list, acct, epoch] = await Promise.all([balances(p), getSubstate(net, account), currentEpoch(net)]);
       const myKey = String((acct.value as any)?.Component?.header?.owner_rule?.ByPublicKey ?? "").toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(myKey)) throw new Error("Could not read your account's public key.");
+      if (!isValidPublicKey(myKey)) throw new Error("Could not read your account's public key.");
       intro.replaceWith(form(net, p, account, myKey, list, epoch));
     } catch (e) {
       status.textContent = errorText(e);
@@ -70,37 +68,20 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
   const review = h("div");
 
   const chosen = () => list[Number(token.value)];
-  max.addEventListener("click", () => (amount.value = formatAmount(BigInt(chosen().amount), chosen().divisibility).replace(/,/g, "")));
+  const lockable = (b: Balance) => lockableAmount(b.resourceAddress, BigInt(b.amount));
+  max.addEventListener("click", () => (amount.value = formatAmount(lockable(chosen()), chosen().divisibility).replace(/,/g, "")));
 
-  // Epochs from the chosen time at the FASTEST epoch rate, so the lock never opens before that time.
-  const unlockEpoch = (): number | null => {
-    const t = Date.parse(when.value);
-    if (!when.value || Number.isNaN(t) || t <= Date.now()) return null;
-    return epoch + Math.ceil((t - Date.now()) / 60_000 / MIN_MINUTES_PER_EPOCH);
-  };
+  // A preview only: the epoch is fetched again at review and again before signing.
+  const target = () => (when.value ? Date.parse(when.value) : Number.NaN);
   when.addEventListener("input", () => {
-    const e = unlockEpoch();
+    const e = unlockEpochFor(net, epoch, target(), Date.now());
     whenOut.textContent =
       e === null
         ? "Pick a time in the future."
-        : `Unlock epoch ${e}: opens no earlier than the time you picked, most likely around ${estimatedDate(e, epoch)} (${epochsAsDuration(e - epoch)} from now).`;
+        : `Opens no earlier than the time you picked, most likely around ${estimatedDate(net, e, epoch)} (${epochsAsDuration(net, e - epoch)} from now).`;
   });
 
-  const beneficiary = (): string | null => {
-    if (meRadio.checked) return myKey;
-    const v = other.value.trim();
-    if (/^[0-9a-f]{64}$/i.test(v)) return v.toLowerCase();
-    if (/^otl_/.test(v)) {
-      try {
-        const a = parseOotleAddress(v);
-        if (a.network !== NETWORK_BYTE[net.name]) return null;
-        return Array.from(a.owner_key as Uint8Array, (x) => x.toString(16).padStart(2, "0")).join("");
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  };
+  const beneficiary = (): string | null => (meRadio.checked ? myKey : parseBeneficiary(other.value, NETWORK_BYTE[net.name]));
 
   const go = h("button", { type: "submit" }, "Review");
   const f = h(
@@ -125,18 +106,28 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
     review.replaceChildren();
     const b = chosen();
     const amt = parseAmount(amount.value, b.divisibility);
-    const ue = unlockEpoch();
+    const t = target();
+    let now: number;
+    try {
+      now = await currentEpoch(net);
+    } catch (err) {
+      errors.textContent = errorText(err);
+      return;
+    }
+    const ue = unlockEpochFor(net, now, t, Date.now());
     const ben = beneficiary();
     const memoBytes = new TextEncoder().encode(memo.value).length;
     const problem =
       amt === null || amt <= 0n
         ? `Enter an amount with at most ${b.divisibility} decimals.`
-        : amt > BigInt(b.amount)
-          ? "That is more than your public balance."
+        : amt > lockable(b)
+          ? b.resourceAddress === NATIVE_TARI
+            ? `That leaves too little for the fee. You can lock up to ${formatAmount(lockable(b), b.divisibility)}.`
+            : "That is more than your public balance."
           : ue === null
             ? "Pick an unlock time in the future."
             : ben === null
-              ? `Enter a valid ${net.label} Ootle address or a 64-character public key.`
+              ? `Enter a valid ${net.label} Ootle address or public key (64 hex characters).`
               : memoBytes > MAX_MEMO_BYTES
                 ? `The memo is ${memoBytes} bytes; the limit is ${MAX_MEMO_BYTES}.`
                 : null;
@@ -144,7 +135,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
       errors.textContent = problem;
       return;
     }
-    review.append(await reviewBox(net, p, account, b, amt!, ue!, ben!, memo.value, ben === myKey, epoch));
+    review.append(await reviewBox(net, p, account, b, amt!, t, ue!, ben!, memo.value, ben === myKey, now));
   });
   return h("div", {}, f, review);
 }
@@ -155,6 +146,7 @@ async function reviewBox(
   account: string,
   b: Balance,
   amount: bigint,
+  target: number,
   unlockEpoch: number,
   beneficiary: string,
   memo: string,
@@ -177,7 +169,9 @@ async function reviewBox(
       h("dt", {}, "Lock"),
       h("dd", { class: "big" }, `${formatAmount(amount, b.divisibility)} ${sym}`),
       h("dt", {}, "Until"),
-      h("dd", {}, `epoch ${unlockEpoch} (around ${estimatedDate(unlockEpoch, epoch)})`),
+      h("dd", {}, `epoch ${unlockEpoch} (around ${estimatedDate(net, unlockEpoch, epoch)})`),
+      h("dt", {}, "Network fee"),
+      h("dd", {}, `up to ${formatAmount(MAX_FEE, 6)} TARI`),
       h("dt", {}, "Beneficiary"),
       h("dd", {}, h("code", { class: "wrap" }, beneficiary), isMe ? " (you)" : ""),
       memo ? h("dt", {}, "Memo") : null,
@@ -193,6 +187,9 @@ async function reviewBox(
   sign.addEventListener("click", async () => {
     sign.setAttribute("disabled", "");
     try {
+      // Time has passed since review: the reviewed epoch must still cover the chosen time.
+      const needed = unlockEpochFor(net, await currentEpoch(net), target, Date.now());
+      if (needed === null || needed > unlockEpoch) throw new Error("Time has moved on since you reviewed. Press Review again.");
       const ix = lockInstructions(net, account, b.resourceAddress, amount, unlockEpoch, beneficiary, memo);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);

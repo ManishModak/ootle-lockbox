@@ -75,7 +75,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
             "span",
             { class: "muted" },
             left > 0
-              ? ` · in ${left} epochs (${epochsAsDuration(left)}, around ${estimatedDate(s.unlockEpoch, epoch)})`
+              ? ` · in ${left} epochs (${epochsAsDuration(net, left)}, around ${estimatedDate(net, s.unlockEpoch, epoch)})`
               : ` · reached ${-left} epochs ago`,
           ),
         ),
@@ -108,7 +108,8 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
     h("div", { class: "row" }, copyButton(location.href, "Copy link to this proof")),
   );
 
-  if (s && l.status === "claimable") page.append(claimBox(net, l));
+  // Claiming signs a call to this component, so only offer it for a genuine Lockbox.
+  if (s && l.status === "claimable" && l.reading.genuine) page.append(claimBox(net, l));
   return page;
 }
 

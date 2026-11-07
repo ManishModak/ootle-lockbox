@@ -1,7 +1,8 @@
 /**
  * Sapient wallet bridge (`window.tari`, docs: github.com/chironbuilds/tari-wallet docs/integration).
  * Builds Lockbox transactions with the Ootle SDK and submits them through the wallet's
- * create/approve/submit flow; the pending request id is kept so a reload can resume it.
+ * create/approve/submit flow. Only the page that created a request submits it, so a reload
+ * abandons it and the user starts again.
  */
 import {
   amountLiteral,
@@ -13,6 +14,7 @@ import {
 } from "@tari-project/ootle";
 import type { Instruction } from "@tari-project/ootle";
 import type { NetConfig } from "./config";
+import { MAX_FEE } from "./newlock";
 
 interface TariProvider {
   isTariWallet?: boolean;
@@ -33,8 +35,6 @@ export interface Balance {
   symbol: string | null;
   name: string | null;
 }
-
-const PENDING_KEY = "lockbox.pendingRequest";
 
 /** Waits briefly for the extension to inject itself. */
 export async function getProvider(timeoutMs = 1500): Promise<TariProvider | null> {
@@ -93,12 +93,15 @@ export function claimInstructions(net: NetConfig, account: string, lock: string)
     .buildUnsignedTransaction().instructions as Instruction[];
 }
 
-/** Runs the transaction without submitting; no approval popup. Throws with the engine's reason. */
+/**
+ * Runs the transaction without submitting; no approval popup. Throws with the engine's reason.
+ * Uses the same fee cap as `submit`, so a dry run that passes means the real one can pay.
+ */
 export async function dryRun(p: TariProvider, instructions: Instruction[]): Promise<unknown> {
-  return p.request({ method: "tari_signAndSubmitTransaction", params: { instructions, dryRun: true } });
+  return p.request({ method: "tari_signAndSubmitTransaction", params: { instructions, dryRun: true, maxFee: MAX_FEE.toString() } });
 }
 
-/** Opens the wallet's approval popup and submits once approved. Resumable after a reload. */
+/** Opens the wallet's approval popup and submits once approved. */
 export async function submit(
   p: TariProvider,
   instructions: Instruction[],
@@ -106,48 +109,22 @@ export async function submit(
 ): Promise<unknown> {
   const { requestId } = await p.request({
     method: "tari_createTransactionRequest",
-    params: { kind: "instructions", instructions, maxFee: "50000" },
+    params: { kind: "instructions", instructions, maxFee: MAX_FEE.toString() },
   });
-  storePending(requestId);
-  return waitForRequest(p, requestId, onStatus);
-}
-
-export async function waitForRequest(p: TariProvider, requestId: string, onStatus: (s: string) => void): Promise<unknown> {
-  try {
-    for (;;) {
-      const r = await p.request({ method: "tari_getTransactionRequest", params: { requestId } });
-      switch (r.status) {
-        case "approved":
-          onStatus("Submitting...");
-          return await p.request({ method: "tari_submitTransactionRequest", params: { requestId } });
-        case "submitted":
-          return r.result;
-        case "rejected":
-        case "failed":
-          throw new Error(r.error ?? `Transaction ${r.status}.`);
-        default:
-          onStatus(r.status === "submitting" ? "Submitting..." : "Waiting for approval in your wallet...");
-          await new Promise((res) => setTimeout(res, 800));
-      }
+  for (;;) {
+    const r = await p.request({ method: "tari_getTransactionRequest", params: { requestId } });
+    switch (r.status) {
+      case "approved":
+        onStatus("Submitting...");
+        return await p.request({ method: "tari_submitTransactionRequest", params: { requestId } });
+      case "submitted":
+        return r.result;
+      case "rejected":
+      case "failed":
+        throw new Error(r.error ?? `Transaction ${r.status}.`);
+      default:
+        onStatus(r.status === "submitting" ? "Submitting..." : "Waiting for approval in your wallet...");
+        await new Promise((res) => setTimeout(res, 800));
     }
-  } finally {
-    storePending(null);
-  }
-}
-
-function storePending(id: string | null) {
-  try {
-    if (id) localStorage.setItem(PENDING_KEY, id);
-    else localStorage.removeItem(PENDING_KEY);
-  } catch {
-    // Storage may be unavailable (private mode); resuming after a reload is then not possible.
-  }
-}
-
-export function pendingRequest(): string | null {
-  try {
-    return localStorage.getItem(PENDING_KEY);
-  } catch {
-    return null;
   }
 }

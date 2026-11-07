@@ -16,6 +16,11 @@ export interface NetConfig {
   lockboxTemplate: string | null;
   /** The value Sapient's `tari_getNetwork` reports for this network. */
   walletNetwork: string;
+  /**
+   * Epoch length in minutes. `min` is the shortest an epoch can be: new locks convert a chosen
+   * time at this rate so they never open early. `typical` only drives the dates shown.
+   */
+  epochMinutes: { min: number; typical: number };
 }
 
 export const NETWORKS: Record<NetworkName, NetConfig> = {
@@ -26,6 +31,7 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     indexer: "https://esme-indexer-a.ootle.tari.com",
     lockboxTemplate: "d7f5ee289465580308d3074a0892d90eefb4bf157200171692bdf47cc9473832",
     walletNetwork: "esmeralda",
+    epochMinutes: { min: 32, typical: 40 }, // measured 32-48 minutes, Nov 2026
   },
   mainnet: {
     name: "mainnet",
@@ -34,16 +40,13 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     indexer: "https://indexer-a.ootle.tari.com",
     lockboxTemplate: null,
     walletNetwork: "mainnet",
+    // Mainnet epochs are 60 L1 blocks (~120 minutes) and drop to 10 blocks (~20 minutes) at the
+    // shorter-epoch fork (consensus_constants.rs). Re-measure after launch.
+    epochMinutes: { min: 20, typical: 120 },
   },
 };
 
 export const DEFAULT_NETWORK: NetworkName = "esmeralda";
-
-/** Epochs last roughly 32-48 minutes; dates shown from epochs are estimates at this rate. */
-export const MINUTES_PER_EPOCH = 40;
-
-/** Fastest epochs seen. New locks convert a chosen time at this rate so they never open early. */
-export const MIN_MINUTES_PER_EPOCH = 32;
 
 /** Matches the template's MAX_MEMO_BYTES. */
 export const MAX_MEMO_BYTES = 280;

@@ -2,7 +2,7 @@
  * Tiny DOM helpers shared by the views. Everything from the chain goes in as text nodes, never as
  * HTML, so token names and memos can't inject markup.
  */
-import { MINUTES_PER_EPOCH, type NetConfig } from "./config";
+import type { NetConfig } from "./config";
 
 type Child = Node | string | number | null | undefined | false;
 type Attrs = Record<string, string | boolean | ((e: Event) => void) | undefined>;
@@ -52,8 +52,8 @@ export function addressLine(value: string, net?: NetConfig, path?: string): HTML
 }
 
 /** "about 3 days" for a number of epochs. Epoch length varies, so this is an estimate. */
-export function epochsAsDuration(epochs: number): string {
-  const minutes = Math.abs(epochs) * MINUTES_PER_EPOCH;
+export function epochsAsDuration(net: NetConfig, epochs: number): string {
+  const minutes = Math.abs(epochs) * net.epochMinutes.typical;
   if (minutes < 90) return `about ${Math.max(1, Math.round(minutes))} minutes`;
   const hours = minutes / 60;
   if (hours < 48) return `about ${Math.round(hours)} hours`;
@@ -64,8 +64,8 @@ export function epochsAsDuration(epochs: number): string {
   return `about ${(days / 365.25).toFixed(1)} years`;
 }
 
-export function estimatedDate(epoch: number, currentEpoch: number): string {
-  const ms = Date.now() + (epoch - currentEpoch) * MINUTES_PER_EPOCH * 60_000;
+export function estimatedDate(net: NetConfig, epoch: number, currentEpoch: number): string {
+  const ms = Date.now() + (epoch - currentEpoch) * net.epochMinutes.typical * 60_000;
   return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
