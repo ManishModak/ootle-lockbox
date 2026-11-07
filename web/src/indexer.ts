@@ -55,13 +55,14 @@ export interface LockEvent {
 /**
  * `Lockbox.LockCreated` events emitted by the pinned template, newest first. Any template can emit
  * an event with this topic, so events from other templates are dropped here. `complete` is false
- * when `maxPages` ran out before the oldest event.
+ * when `maxPages` ran out before the oldest event or an event couldn't be decoded.
  */
 export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{ events: LockEvent[]; complete: boolean }> {
   const template = net.lockboxTemplate;
   if (!template) return { events: [], complete: true };
   const out: LockEvent[] = [];
   const seen = new Set<string>();
+  let decoded = true;
   let before: number | undefined;
   for (let page = 0; page < maxPages; page++) {
     const q = new URLSearchParams({ topic: "Lockbox.LockCreated", limit: "100" });
@@ -72,6 +73,7 @@ export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{
       try {
         e = decodeEvent(enc);
       } catch {
+        decoded = false; // could be one of ours
         continue;
       }
       if (String(e.template_address).toLowerCase() !== template || e.topic !== "Lockbox.LockCreated") continue;
@@ -87,7 +89,7 @@ export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{
         unlockEpoch: Number(p.unlock_epoch),
       });
     }
-    if (typeof r.next_before_id !== "number" || (r.events ?? []).length < 100) return { events: out, complete: true };
+    if (typeof r.next_before_id !== "number" || (r.events ?? []).length < 100) return { events: out, complete: decoded };
     before = r.next_before_id;
   }
   return { events: out, complete: false };

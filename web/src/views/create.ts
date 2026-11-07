@@ -8,7 +8,7 @@ import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, u
 import { errorText, epochsAsDuration, estimatedDate, h, link, notice } from "../ui";
 import { formatAmount, parseAmount, readLock, readResource } from "../verify";
 import { balances, connect, dryRun, getProvider, lockInstructions, submit, walletKey, walletNetwork, type Balance } from "../wallet";
-import { checkList } from "./lock";
+import { checkList, showTxError } from "./lock";
 import { notPublishedNotice } from "./home";
 
 export async function createView(net: NetConfig, root: HTMLElement) {
@@ -202,7 +202,7 @@ async function reviewBox(
       if (lock) location.hash = `#/${net.name}/lock/${lock}`;
       else status.textContent = "Locked. Your lock will appear under Recent locks shortly.";
     } catch (e) {
-      status.textContent = errorText(e);
+      showTxError(net, status, e);
       sign.removeAttribute("disabled");
     }
   });

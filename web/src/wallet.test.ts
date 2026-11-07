@@ -1,26 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./config";
-import { dryRun, engineVerdict, submit } from "./wallet";
+import { dryRun, engineVerdict, forgetEarlierTransaction, submit, TxBlocked } from "./wallet";
 
 const net = NETWORKS.esmeralda;
 const accept = { finalize: { result: { Accept: {} } } };
 
-/** A scripted wallet: `get` answers tari_getTransactionRequest, `sub` tari_submitTransactionRequest. */
-function fakeWallet(opts: { get: (id: string) => unknown; sub?: () => unknown }) {
-  const calls: string[] = [];
+/**
+ * A scripted wallet. `status(id)` answers tari_getTransactionRequest (throw = transport failure);
+ * `sub(id)` answers tari_submitTransactionRequest. Records every call.
+ */
+function fakeWallet(opts: { status: (id: string) => unknown; sub?: (id: string) => unknown; dry?: unknown }) {
+  const calls: [string, string?][] = [];
   let n = 0;
   const p = {
     isTariWallet: true,
     async request({ method, params }: { method: string; params?: any }) {
-      calls.push(method);
+      calls.push([method, params?.requestId]);
       if (method === "tari_createTransactionRequest") return { requestId: `req${++n}` };
-      if (method === "tari_getTransactionRequest") return opts.get(params.requestId);
-      if (method === "tari_submitTransactionRequest") return opts.sub ? opts.sub() : accept;
-      if (method === "tari_signAndSubmitTransaction") return opts.get("dry");
+      if (method === "tari_getTransactionRequest") return opts.status(params.requestId);
+      if (method === "tari_submitTransactionRequest") return opts.sub ? opts.sub(params.requestId) : accept;
+      if (method === "tari_signAndSubmitTransaction") return opts.dry;
       throw new Error(`unexpected ${method}`);
     },
   };
-  return { p, calls, creates: () => calls.filter((c) => c === "tari_createTransactionRequest").length };
+  const count = (m: string) => calls.filter(([c]) => c === m).length;
+  return { p: p as any, calls, creates: () => count("tari_createTransactionRequest"), submits: () => calls.filter(([c]) => c === "tari_submitTransactionRequest").map(([, id]) => id) };
 }
 
 /** Runs a promise to completion while fake timers advance. */
@@ -29,14 +33,33 @@ async function settle<T>(pr: Promise<T>): Promise<{ ok: T } | { err: Error }> {
   await vi.runAllTimersAsync();
   return out;
 }
+const errOf = (r: { ok: unknown } | { err: Error }) => ("err" in r ? r.err : null);
+
+const KEY = "lockbox.pending.esmeralda";
+let store: Map<string, string>;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  const store = new Map<string, string>();
+  store = new Map();
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
+  });
+  // Web Locks with ifAvailable, as browsers share it across tabs.
+  const held = new Set<string>();
+  vi.stubGlobal("navigator", {
+    locks: {
+      async request(name: string, _opts: unknown, cb: (l: unknown) => Promise<unknown>) {
+        if (held.has(name)) return cb(null);
+        held.add(name);
+        try {
+          return await cb({ name });
+        } finally {
+          held.delete(name);
+        }
+      },
+    },
   });
 });
 afterEach(() => {
@@ -54,68 +77,108 @@ describe("engineVerdict / dryRun", () => {
   });
 
   it("throws unless the engine accepted", async () => {
-    await expect(dryRun(fakeWallet({ get: () => ({ result: { finalize: { result: { Reject: "no" } } } }) }).p as any, [])).rejects.toThrow("reject");
-    await expect(dryRun(fakeWallet({ get: () => ({}) }).p as any, [])).rejects.toThrow("recognise");
-    await expect(dryRun(fakeWallet({ get: () => accept }).p as any, [])).resolves.toBeUndefined();
+    const dry = (result: unknown) => dryRun(fakeWallet({ status: () => null, dry: result }).p, []);
+    await expect(dry({ result: { finalize: { result: { Reject: "no" } } } })).rejects.toThrow("reject");
+    await expect(dry({})).rejects.toThrow("recognise");
+    await expect(dry(accept)).resolves.toBeUndefined();
   });
 });
 
 describe("submit", () => {
+  const run = (w: ReturnType<typeof fakeWallet>) => settle(submit(w.p, net, [], () => {}));
+
   it("recovers a lost submit response by polling the same request", async () => {
-    let submitted = false;
+    let done = false;
     const w = fakeWallet({
-      get: () => (submitted ? { status: "submitted", result: accept } : { status: "approved" }),
+      status: () => (done ? { status: "submitted", result: accept } : { status: "approved" }),
       sub: () => {
-        submitted = true;
+        done = true;
         throw new Error("connection lost");
       },
     });
-    const r = await settle(submit(w.p as any, net, [], () => {}));
-    expect(r).toEqual({ ok: accept });
+    expect(await run(w)).toEqual({ ok: accept });
     expect(w.creates()).toBe(1);
+    expect(store.has(KEY)).toBe(false);
   });
 
-  it("keeps an unknown outcome and blocks a new transaction until it is final", async () => {
-    let state: unknown = "down";
+  it("times out a submit that never answers, then finds the outcome on the same request", async () => {
+    let done = false;
     const w = fakeWallet({
-      get: () => {
-        if (state === "down") throw new Error("wallet unreachable");
-        return state;
+      status: () => (done ? { status: "submitted", result: accept } : { status: "approved" }),
+      sub: () => {
+        done = true;
+        return new Promise(() => {}); // the response is lost for good
       },
     });
-    const first = await settle(submit(w.p as any, net, [], () => {}));
-    expect("err" in first && first.err.message).toContain("outcome is unknown");
+    expect(await run(w)).toEqual({ ok: accept });
+    expect(w.submits()).toEqual(["req1"]);
+  });
 
-    state = { status: "submitting", expiresAt: Date.now() + 60_000 };
-    const blocked = await settle(submit(w.p as any, net, [], () => {}));
-    expect("err" in blocked && blocked.err.message).toContain("still submitting");
+  it("keeps a request stuck in submitting and lets the user forget it deliberately", async () => {
+    const w = fakeWallet({ status: (id) => (id === "req1" ? { status: "submitting", expiresAt: 0 } : { status: "submitted", result: accept }) });
+    const first = errOf(await run(w));
+    expect(first).toBeInstanceOf(TxBlocked);
+    expect((first as TxBlocked).canForget).toBe(true);
+    expect(store.get(KEY)).toBe("req1");
+    // Still blocked on the next attempt, without creating anything new.
+    expect(errOf(await run(w))).toBeInstanceOf(TxBlocked);
     expect(w.creates()).toBe(1);
-
-    state = { status: "submitted", result: accept };
-    const next = await settle(submit(w.p as any, net, [], () => {}));
-    expect(next).toEqual({ ok: accept });
+    forgetEarlierTransaction(net);
+    expect(await run(w)).toEqual({ ok: accept });
     expect(w.creates()).toBe(2);
   });
 
-  it("makes the user check their wallet once if it forgot the earlier request", async () => {
-    let forgot = false;
+  it("never forgets a saved request because the wallet didn't answer", async () => {
+    store.set(KEY, "old");
+    let up = false;
     const w = fakeWallet({
-      get: (id) => {
-        if (id === "req1" && forgot) throw new Error("unknown request");
-        if (id === "req1") throw new Error("wallet unreachable");
-        return { status: "submitted", result: accept };
+      status: (id) => {
+        if (!up) throw new Error("wallet unreachable");
+        return id === "old" ? { status: "failed", error: "boom" } : { status: "submitted", result: accept };
       },
     });
-    await settle(submit(w.p as any, net, [], () => {}));
-    forgot = true;
-    const once = await settle(submit(w.p as any, net, [], () => {}));
-    expect("err" in once && once.err.message).toContain("Check your wallet's activity");
-    expect(await settle(submit(w.p as any, net, [], () => {}))).toEqual({ ok: accept });
+    expect(errOf(await run(w))?.message).toContain("Lost contact");
+    expect(store.get(KEY)).toBe("old");
+    expect(w.creates()).toBe(0);
+    up = true; // the old one never executed, so the next attempt goes ahead
+    expect(await run(w)).toEqual({ ok: accept });
+    expect(w.creates()).toBe(1);
+  });
+
+  it("shows that a saved request went through instead of starting a new one", async () => {
+    store.set(KEY, "old");
+    const w = fakeWallet({ status: () => ({ status: "submitted", result: accept }) });
+    const r = errOf(await run(w));
+    expect(r?.message).toContain("went through");
+    expect(w.creates()).toBe(0);
+    expect(store.has(KEY)).toBe(false);
+    expect(await run(w)).toEqual({ ok: accept }); // a separate, deliberate attempt
+    expect(w.creates()).toBe(1);
+  });
+
+  it("submits a saved request that was approved before a reload, and stops there", async () => {
+    store.set(KEY, "old");
+    let done = false;
+    const w = fakeWallet({
+      status: () => (done ? { status: "submitted", result: accept } : { status: "approved" }),
+      sub: () => ((done = true), accept),
+    });
+    expect(errOf(await run(w))?.message).toContain("went through");
+    expect(w.submits()).toEqual(["old"]);
+    expect(w.creates()).toBe(0);
+  });
+
+  it("refuses a second transaction while one is running", async () => {
+    const w = fakeWallet({ status: () => ({ status: "submitted", result: accept }) });
+    const [a, b] = await Promise.all([run(w), run(w)]);
+    const blocked = [a, b].filter((r) => errOf(r)?.message.includes("Another"));
+    expect(blocked).toHaveLength(1);
+    expect(w.creates()).toBe(1);
   });
 
   it("reports an on-chain rejection instead of success", async () => {
-    const w = fakeWallet({ get: () => ({ status: "submitted", result: { finalize: { result: { Reject: "too early" } } } }) });
-    const r = await settle(submit(w.p as any, net, [], () => {}));
-    expect("err" in r && r.err.message).toContain("too early");
+    const w = fakeWallet({ status: () => ({ status: "submitted", result: { finalize: { result: { Reject: "too early" } } } }) });
+    expect(errOf(await run(w))?.message).toContain("too early");
+    expect(store.has(KEY)).toBe(false);
   });
 });

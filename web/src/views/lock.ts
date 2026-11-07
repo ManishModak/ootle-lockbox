@@ -4,7 +4,7 @@ import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
 import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, pill } from "../ui";
 import { formatAmount, type Check } from "../verify";
-import { claimInstructions, connect, dryRun, getProvider, submit, walletKey, walletNetwork } from "../wallet";
+import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, submit, TxBlocked, walletKey, walletNetwork } from "../wallet";
 
 export async function lockView(net: NetConfig, id: string, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / lock"), loading());
@@ -129,6 +129,21 @@ export function checkList(checks: Check[]): HTMLElement {
   );
 }
 
+/**
+ * Shows a failed create/claim in `status`. When an earlier transaction's outcome is unknown, adds
+ * the deliberate way out: the user checks their wallet history, then forgets it here.
+ */
+export function showTxError(net: NetConfig, status: HTMLElement, e: unknown) {
+  status.textContent = errorText(e);
+  if (!(e instanceof TxBlocked && e.canForget)) return;
+  const forget = h("button", { type: "button", class: "ghost small" }, "I've checked my wallet: forget it");
+  forget.addEventListener("click", () => {
+    forgetEarlierTransaction(net);
+    status.textContent = "Forgotten. You can try again.";
+  });
+  status.append(" ", forget);
+}
+
 /** Shown once the unlock epoch is reached: the beneficiary claims into their connected account. */
 function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
   const status = h("p", { class: "muted", "aria-live": "polite" });
@@ -152,7 +167,7 @@ function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
       status.textContent = "Claimed. Reloading…";
       setTimeout(() => location.reload(), 1500);
     } catch (e) {
-      status.textContent = errorText(e);
+      showTxError(net, status, e);
       btn.removeAttribute("disabled");
     }
   });

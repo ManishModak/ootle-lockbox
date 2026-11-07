@@ -2,8 +2,8 @@
  * Sapient wallet bridge (`window.tari`, docs: github.com/chironbuilds/tari-wallet docs/integration).
  * Builds Lockbox transactions with the Ootle SDK and submits them through the wallet's
  * create/approve/submit flow. A lock can't be undone, so a transaction whose outcome is unknown
- * (lost wallet response, reload) must be settled before another is created: the request id is
- * kept per network until the wallet reports a final status.
+ * (lost wallet response, reload) must be settled before another is created. See "Transaction
+ * tracking" below.
  */
 import {
   amountLiteral,
@@ -130,56 +130,145 @@ export async function dryRun(p: TariProvider, instructions: Instruction[]): Prom
   throw new Error(v ? `The network would reject this: ${v.rejected}` : "The dry run returned a result this page doesn't recognise, so it stopped.");
 }
 
+/*
+ * Transaction tracking. A lock can't be undone, so the page must never start a second lock while
+ * an earlier one might still execute. Rules:
+ *  - one transaction at a time per network, across tabs (Web Locks);
+ *  - the request id is saved before anything can execute and cleared only on a final status
+ *    (submitted, rejected, failed) or when the user deliberately forgets it;
+ *  - a saved request is followed to its outcome (submitted if approved) before any new one, and
+ *    the click that settles it never starts a new transaction;
+ *  - every wallet call has a deadline; a timeout keeps the id and reports an unknown outcome.
+ */
+
+/** A transaction can't start yet. `canForget`: the user may check their wallet and forget the earlier one. */
+export class TxBlocked extends Error {
+  constructor(message: string, readonly canForget: boolean) {
+    super(message);
+  }
+}
+
+const RPC_TIMEOUT_MS = 30_000;
+const SUBMIT_TIMEOUT_MS = 180_000;
+/** How long a request may sit approved or submitting before the page gives up and asks the user. */
+const STUCK_LIMIT_MS = 10 * 60_000;
+const MAX_FAILURES = 5;
+
 const pendingKey = (net: NetConfig) => `lockbox.pending.${net.name}`;
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
-const FINAL = new Set(["submitted", "rejected", "failed"]);
 
-function savePending(net: NetConfig, requestId: string | null) {
-  try {
-    if (requestId) localStorage.setItem(pendingKey(net), requestId);
-    else localStorage.removeItem(pendingKey(net));
-  } catch {
-    // No storage (private mode): a reload can't be reconciled, but a live page still is.
-  }
+const UNKNOWN =
+  "The outcome of an earlier Lockbox transaction from this browser is unknown. Check your wallet's history: if it went through, don't repeat it.";
+
+/** A wallet call that fails instead of hanging. */
+function rpc(p: TariProvider, method: string, params: unknown, ms = RPC_TIMEOUT_MS): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${method} timed out`)), ms);
+    p.request({ method, params }).then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
 }
 
-function loadPending(net: NetConfig): string | null {
-  try {
-    return localStorage.getItem(pendingKey(net));
-  } catch {
-    return null;
-  }
+function savedRequest(net: NetConfig): string | null {
+  return localStorage.getItem(pendingKey(net));
 }
+
+/** Clears the saved id only if it is still `requestId` (never another request's record). */
+function clearSaved(net: NetConfig, requestId: string) {
+  if (localStorage.getItem(pendingKey(net)) === requestId) localStorage.removeItem(pendingKey(net));
+}
+
+/** For the "I've checked my wallet" action after a TxBlocked with canForget. */
+export function forgetEarlierTransaction(net: NetConfig) {
+  localStorage.removeItem(pendingKey(net));
+}
+
+type Outcome = { status: "submitted"; result: unknown } | { status: "rejected" | "failed"; error: string };
 
 /**
- * Before a new transaction: make sure the last one this browser started on `net` has a final
- * outcome. Throws while it is still open; if the wallet no longer knows it, forgets it and throws
- * once, so the user checks their wallet before trying again.
+ * Follows one request to a final outcome, submitting it once approved (the wallet runs at most one
+ * submit per request, so re-submitting after a lost response is safe). Throws TxBlocked, with the
+ * id still saved, when the wallet stops answering or the request stays stuck.
  */
-async function settlePrevious(p: TariProvider, net: NetConfig) {
-  const id = loadPending(net);
-  if (!id) return;
-  let r: any;
-  try {
-    r = await p.request({ method: "tari_getTransactionRequest", params: { requestId: id } });
-  } catch {
-    savePending(net, null);
-    throw new Error("Your wallet no longer knows an earlier Lockbox transaction from this browser. Check your wallet's activity: if it went through, don't repeat it. Otherwise press again to continue.");
+async function follow(p: TariProvider, requestId: string, onStatus: (s: string) => void): Promise<Outcome> {
+  let pollFailures = 0; // consecutive: reset by any answer
+  let submitFailures = 0;
+  let stuckSince: number | null = null;
+  for (;;) {
+    let r: any;
+    try {
+      r = await rpc(p, "tari_getTransactionRequest", { requestId });
+    } catch {
+      if (++pollFailures >= MAX_FAILURES) throw new TxBlocked(`Lost contact with your wallet. ${UNKNOWN}`, true);
+      await sleep(1500);
+      continue;
+    }
+    pollFailures = 0;
+    if (r.status === "submitted") return { status: "submitted", result: r.result };
+    if (r.status === "rejected" || r.status === "failed") return { status: r.status, error: r.error ?? `Transaction ${r.status}.` };
+    if (r.status === "pending") {
+      stuckSince = null;
+      // Sapient never runs a request whose approval window expired.
+      if (typeof r.expiresAt === "number" && Date.now() > r.expiresAt) return { status: "failed", error: "The request expired in your wallet." };
+      onStatus("Waiting for approval in your wallet...");
+      await sleep(800);
+      continue;
+    }
+    stuckSince ??= Date.now();
+    if (Date.now() - stuckSince > STUCK_LIMIT_MS) throw new TxBlocked(`Your wallet has been submitting for a long time. ${UNKNOWN}`, true);
+    onStatus("Submitting...");
+    if (r.status === "approved") {
+      try {
+        return { status: "submitted", result: await rpc(p, "tari_submitTransactionRequest", { requestId }, SUBMIT_TIMEOUT_MS) };
+      } catch {
+        // Failed (the next poll says so) or the response was lost (the next poll shows progress).
+        if (++submitFailures >= MAX_FAILURES) throw new TxBlocked(`Lost contact with your wallet while submitting. ${UNKNOWN}`, true);
+      }
+    }
+    await sleep(1500);
   }
-  if (FINAL.has(r.status)) return savePending(net, null);
-  const expired = typeof r.expiresAt === "number" && Date.now() > r.expiresAt;
-  if (expired && r.status !== "submitting") return savePending(net, null); // never submitted, can't be now
-  if (expired) {
-    savePending(net, null);
-    throw new Error("An earlier Lockbox transaction from this browser stopped while submitting. Check your wallet's activity: if it went through, don't repeat it. Otherwise press again to continue.");
-  }
-  throw new Error(`An earlier Lockbox transaction from this browser is still ${r.status} in your wallet. Approve or reject it there, then try again.`);
+}
+
+/** The engine's rejection inside a submitted result, as an error message, or null. */
+function rejectionText(result: unknown): string | null {
+  const v = engineVerdict(result);
+  return v !== null && v !== "accepted" ? v.rejected : null;
 }
 
 /**
- * Opens the wallet's approval popup and submits once approved. Returns the operation's result.
- * Lost responses are retried by polling the same request (the wallet lets only one submit of a
- * request execute); after repeated failures it throws with the request still recorded.
+ * Settles the request saved by an earlier attempt. Returns normally only when nothing from it can
+ * still execute and nothing executed; otherwise throws, so the user sees the outcome first.
+ */
+async function settleSaved(p: TariProvider, net: NetConfig, onStatus: (s: string) => void) {
+  const id = savedRequest(net);
+  if (!id) return;
+  onStatus("Checking an earlier transaction from this browser...");
+  const out = await follow(p, id, onStatus);
+  clearSaved(net, id);
+  if (out.status !== "submitted") return; // never executed: safe to go on
+  const rejected = rejectionText(out.result);
+  throw new TxBlocked(
+    rejected
+      ? `An earlier Lockbox transaction from this browser was rejected by the network (${rejected}). Press again to continue.`
+      : "An earlier Lockbox transaction from this browser went through. Check your locks and wallet history before doing this again; press again to continue.",
+    false,
+  );
+}
+
+/** Runs `fn` only if no other tab or call is running a transaction on `net`. */
+async function exclusive<T>(net: NetConfig, fn: () => Promise<T>): Promise<T> {
+  if (!navigator.locks) throw new Error("This browser can't track transactions safely. Use lockbox-cli instead.");
+  return navigator.locks.request(`lockbox-tx-${net.name}`, { ifAvailable: true }, async (lock) => {
+    if (!lock) throw new TxBlocked("Another Lockbox tab or action is running a transaction. Finish it there first.", false);
+    return fn();
+  });
+}
+
+/**
+ * Opens the wallet's approval popup for `instructions` and submits once approved. Returns the
+ * operation's result. Throws TxBlocked while an earlier transaction is unsettled.
  */
 export async function submit(
   p: TariProvider,
@@ -187,54 +276,23 @@ export async function submit(
   instructions: Instruction[],
   onStatus: (s: string) => void,
 ): Promise<unknown> {
-  await settlePrevious(p, net);
-  const { requestId } = await p.request({
-    method: "tari_createTransactionRequest",
-    params: { kind: "instructions", instructions, maxFee: MAX_FEE.toString() },
+  return exclusive(net, async () => {
+    await settleSaved(p, net, onStatus);
+    // Saving must work before anything can execute; a throw here stops the transaction.
+    localStorage.setItem(pendingKey(net), "probe");
+    localStorage.removeItem(pendingKey(net));
+    const { requestId } = await rpc(p, "tari_createTransactionRequest", {
+      kind: "instructions",
+      instructions,
+      maxFee: MAX_FEE.toString(),
+    });
+    // A reload before this line leaves an approval popup nobody will submit, so it can't execute.
+    localStorage.setItem(pendingKey(net), requestId);
+    const out = await follow(p, requestId, onStatus);
+    clearSaved(net, requestId);
+    if (out.status !== "submitted") throw new Error(out.error);
+    const rejected = rejectionText(out.result);
+    if (rejected) throw new Error(`The network rejected the transaction: ${rejected}`);
+    return out.result;
   });
-  savePending(net, requestId);
-  const done = (result: unknown) => {
-    savePending(net, null);
-    const v = engineVerdict(result);
-    if (v !== null && v !== "accepted") throw new Error(`The network rejected the transaction: ${v.rejected}`);
-    return result;
-  };
-  let failures = 0;
-  const lost = () =>
-    new Error("Lost contact with your wallet, so the outcome is unknown. Check your wallet's activity; this page checks this transaction before starting another.");
-  for (;;) {
-    let r: any;
-    try {
-      r = await p.request({ method: "tari_getTransactionRequest", params: { requestId } });
-    } catch {
-      if (++failures >= 5) throw lost();
-      await sleep(1500);
-      continue;
-    }
-    switch (r.status) {
-      case "approved":
-        onStatus("Submitting...");
-        try {
-          return done(await p.request({ method: "tari_submitTransactionRequest", params: { requestId } }));
-        } catch (e) {
-          // Either it failed (the next poll says "failed") or the response was lost (poll again).
-          if (++failures >= 5) throw lost();
-          await sleep(1500);
-          continue;
-        }
-      case "submitted":
-        return done(r.result);
-      case "rejected":
-      case "failed":
-        savePending(net, null);
-        throw new Error(r.error ?? `Transaction ${r.status}.`);
-      default:
-        if (r.status === "pending" && typeof r.expiresAt === "number" && Date.now() > r.expiresAt) {
-          savePending(net, null);
-          throw new Error("The request expired in your wallet.");
-        }
-        onStatus(r.status === "submitting" ? "Submitting..." : "Waiting for approval in your wallet...");
-        await sleep(800);
-    }
-  }
 }

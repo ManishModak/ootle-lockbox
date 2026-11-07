@@ -51,7 +51,9 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
     const events = mine.slice(0, MAX_LOCKS);
     const loaded = await mapLimit(events, 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
     const locks = loaded.filter((x): x is LoadedLock => x !== null);
-    const failed = loaded.length - locks.length;
+    // Locks whose state or still-locked balance couldn't be read count as missing too.
+    const unreadable = (l: LoadedLock) => l.reading.state === null || (l.reading.genuine && l.status === "locked" && l.vault?.amount == null);
+    const failed = loaded.length - locks.length + locks.filter(unreadable).length;
     const complete = found.complete && mine.length === events.length && failed === 0;
     section.lastElementChild?.remove();
     section.append(lockTable(net, locks, r.divisibility, r.totalSupply, epoch, complete));
