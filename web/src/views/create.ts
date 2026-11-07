@@ -4,10 +4,10 @@
  */
 import { MAX_MEMO_BYTES, REPO_URL, type NetConfig } from "../config";
 import { currentEpoch, getSubstate } from "../indexer";
-import { isValidPublicKey, lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
+import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
 import { errorText, epochsAsDuration, estimatedDate, h, link, notice } from "../ui";
 import { formatAmount, parseAmount, readLock, readResource } from "../verify";
-import { balances, connect, dryRun, getProvider, lockInstructions, submit, walletNetwork, type Balance } from "../wallet";
+import { balances, connect, dryRun, getProvider, lockInstructions, submit, walletKey, walletNetwork, type Balance } from "../wallet";
 import { checkList } from "./lock";
 import { notPublishedNotice } from "./home";
 
@@ -37,9 +37,12 @@ export async function createView(net: NetConfig, root: HTMLElement) {
       const wn = await walletNetwork(p);
       if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}. Switch it to ${net.label}, or open this page for ${wn}.`);
       const account = await connect(p);
-      const [list, acct, epoch] = await Promise.all([balances(p), getSubstate(net, account), currentEpoch(net)]);
-      const myKey = String((acct.value as any)?.Component?.header?.owner_rule?.ByPublicKey ?? "").toLowerCase();
-      if (!isValidPublicKey(myKey)) throw new Error("Could not read your account's public key.");
+      const [list, acct, epoch, myKey] = await Promise.all([balances(p), getSubstate(net, account), currentEpoch(net), walletKey(p, net)]);
+      // "Me" is the wallet's own key. The indexer's view of the account must agree, which also
+      // confirms this key is the one that signs for the account (and so can claim).
+      const owner = String((acct.value as any)?.Component?.header?.owner_rule?.ByPublicKey ?? "").toLowerCase();
+      if (!myKey) throw new Error(`Could not read your wallet's ${net.label} address.`);
+      if (owner !== myKey) throw new Error("Your wallet's key doesn't match its account's owner on the indexer, so this page can't confirm who you are. Lock with lockbox-cli instead.");
       intro.replaceWith(form(net, p, account, myKey, list, epoch));
     } catch (e) {
       status.textContent = errorText(e);
@@ -78,7 +81,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
     whenOut.textContent =
       e === null
         ? "Pick a time in the future."
-        : `Opens no earlier than the time you picked, most likely around ${estimatedDate(net, e, epoch)} (${epochsAsDuration(net, e - epoch)} from now).`;
+        : `Estimated to open around ${estimatedDate(net, e, epoch)} (${epochsAsDuration(net, e - epoch)} from now). The unlock epoch is set so it can't open before your time unless epochs get shorter than ${net.epochMinutes.min} minutes.`;
   });
 
   const beneficiary = (): string | null => (meRadio.checked ? myKey : parseBeneficiary(other.value, NETWORK_BYTE[net.name]));
@@ -193,7 +196,7 @@ async function reviewBox(
       const ix = lockInstructions(net, account, b.resourceAddress, amount, unlockEpoch, beneficiary, memo);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);
-      const result = await submit(p, ix, (t) => (status.textContent = t));
+      const result = await submit(p, net, ix, (t) => (status.textContent = t));
       status.textContent = "Locked. Finding your lock…";
       const lock = await findNewLock(net, result);
       if (lock) location.hash = `#/${net.name}/lock/${lock}`;

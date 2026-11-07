@@ -70,6 +70,17 @@ describe("readLock", () => {
     expect(readLock(fake, TEMPLATE).genuine).toBe(false);
   });
 
+  it("rejects a beneficiary that is not a valid public key", () => {
+    const fake = clone(lockFixture);
+    const bad = "ff".repeat(32);
+    fake.Component.body.state[1] = { "@cbor": "bytes", hex: bad } as never;
+    const nf = (fake.Component.header.access_rules.method_access as any).claim.Restricted.Require.Require.NonFungibleAddress;
+    nf.id.U256 = bad;
+    const r = readLock(fake, TEMPLATE);
+    expect(r.checks.find((c) => c.label === "Only the beneficiary can claim")?.ok).toBe(true);
+    expect(r.genuine).toBe(false);
+  });
+
   it("fails closed on unreadable state", () => {
     const fake = clone(lockFixture);
     fake.Component.body.state = fake.Component.body.state.slice(0, 5);

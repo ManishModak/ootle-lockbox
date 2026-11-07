@@ -7,6 +7,7 @@
  * Lockbox template with fake state (engine `UpdateComponentTemplate`), so the template alone proves
  * nothing. The token's own rules decide whether its issuer can still undo a lock.
  */
+import { isValidPublicKey } from "./newlock";
 
 /** One line on a proof page: passed or not, with a plain-language reason. */
 export interface Check {
@@ -111,6 +112,12 @@ export function readLock(value: Json, lockboxTemplate: string): LockReading {
   const state = parseState(comp.body);
   checks.push({ ok: state !== null, label: "Lock data is readable" });
   if (state) {
+    const validKey = isValidPublicKey(state.beneficiary);
+    checks.push({
+      ok: validKey,
+      label: "The beneficiary key is a real public key",
+      detail: validKey ? undefined : "nobody can ever sign for it, so the tokens can't be claimed",
+    });
     const ok = claimRuleBindsTo(header.access_rules, state.beneficiary);
     checks.push({
       ok,

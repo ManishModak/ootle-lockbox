@@ -1,10 +1,10 @@
 /** Proof page for one lock: what it holds, until when, for whom, and whether to trust it. */
 import type { NetConfig } from "../config";
-import { currentEpoch, getSubstate, indexerHost } from "../indexer";
+import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
 import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, pill } from "../ui";
 import { formatAmount, type Check } from "../verify";
-import { claimInstructions, connect, dryRun, getProvider, submit, walletNetwork } from "../wallet";
+import { claimInstructions, connect, dryRun, getProvider, submit, walletKey, walletNetwork } from "../wallet";
 
 export async function lockView(net: NetConfig, id: string, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / lock"), loading());
@@ -142,15 +142,13 @@ function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
       const wn = await walletNetwork(p);
       if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}; this lock is on ${net.label}.`);
       const account = await connect(p);
-      const acct = await getSubstate(net, account);
-      const owner = (acct.value as any)?.Component?.header?.owner_rule?.ByPublicKey;
-      if (String(owner).toLowerCase() !== l.reading.state!.beneficiary) {
-        throw new Error("The connected account is not this lock's beneficiary.");
+      if ((await walletKey(p, net)) !== l.reading.state!.beneficiary) {
+        throw new Error("The connected wallet is not this lock's beneficiary.");
       }
       const ix = claimInstructions(net, account, l.id);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);
-      await submit(p, ix, (t) => (status.textContent = t));
+      await submit(p, net, ix, (t) => (status.textContent = t));
       status.textContent = "Claimed. Reloading…";
       setTimeout(() => location.reload(), 1500);
     } catch (e) {
