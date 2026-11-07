@@ -1,5 +1,7 @@
-//! Test-only fungible token: `mint` creates a public token whose whole supply anyone can take.
+//! Test-only tokens: `mint` creates a public token whose whole supply anyone can take;
+//! `confidential` returns a bucket of a new confidential resource holding blinded commitments.
 use tari_template_lib::prelude::*;
+use tari_template_lib::types::confidential::ConfidentialOutputStatement;
 
 #[template]
 mod test_token {
@@ -23,6 +25,13 @@ mod test_token {
 
         pub fn take(&mut self, amount: Amount) -> Bucket {
             self.vault.withdraw(amount)
+        }
+
+        pub fn confidential(statement: ConfidentialOutputStatement) -> Bucket {
+            ResourceBuilder::confidential()
+                .with_token_symbol("CONF")
+                .disable_total_supply_tracking()
+                .initial_supply(statement)
         }
     }
 }
