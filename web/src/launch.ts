@@ -14,7 +14,7 @@
  * template with fake state), so the record and every lock must also have no owner and be
  * non-upgradable. Missing or unreadable data gives "unknown", never a pass.
  */
-import { cborHex, readLock, readVault, toBigInt, toEpoch, type Check } from "./verify";
+import { cborHex, toBigInt, toEpoch, type Check, type LockReading, type VaultBalance } from "./verify";
 
 type Json = unknown;
 const isObj = (x: Json): x is Record<string, Json> => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -35,19 +35,19 @@ export interface LaunchRecord {
   createdAtEpoch: bigint;
 }
 
-/** Decoded substates for one launch; a lock or vault that couldn't be read is `null`. */
+/** A lock as `loadLock` reads it: checked against the pinned Lockbox template, plus its vault. */
+export interface LockInput {
+  reading: LockReading;
+  vault: VaultBalance | null;
+}
+
+/** Decoded substates for one launch. A lock missing from `locks` couldn't be read. */
 export interface LaunchInputs {
   recordId: string;
   record: Json;
   resourceId: string;
   resource: Json;
-  /** By lock component address: the lock and its vault. */
-  locks: Map<string, { lock: Json | null; vault: Json | null }>;
-}
-
-export interface Pins {
-  launchTemplate: string;
-  lockboxTemplate: string;
+  locks: Map<string, LockInput>;
 }
 
 export type Fact = "yes" | "no" | "unknown";
@@ -86,6 +86,12 @@ function parseRecord(body: Json): LaunchRecord | null {
     locks.push({ lock, amount, unlockEpoch, beneficiary });
   }
   return { resource, supply, locks, createdAtEpoch };
+}
+
+/** The lock addresses a record lists, to know what to read; empty if the record is unreadable. */
+export function recordLockIds(value: Json): string[] {
+  const comp = isObj(value) && isObj(value.Component) ? value.Component : null;
+  return parseRecord(comp?.body)?.locks.map((l) => l.lock) ?? [];
 }
 
 /** Header checks for a record: pinned template, no owner, never upgradable, only `info` callable. */
@@ -141,8 +147,8 @@ function sameRules(rules: Json): boolean {
 }
 
 /** Runs every check and folds them into the four facts. */
-export function launchProof(input: LaunchInputs, pins: Pins): LaunchProof {
-  const { checks, record } = recordChecks(input.record, pins.launchTemplate);
+export function launchProof(input: LaunchInputs, launchTemplate: string): LaunchProof {
+  const { checks, record } = recordChecks(input.record, launchTemplate);
   const recordOk = checks.every((c) => c.ok);
 
   const r = isObj(input.resource) && isObj(input.resource.Resource) ? input.resource.Resource : null;
@@ -171,8 +177,7 @@ export function launchProof(input: LaunchInputs, pins: Pins): LaunchProof {
   let allocationsLocked: Fact = issued === "yes" ? "yes" : issued;
   if (record && issued === "yes") {
     for (const want of record.locks) {
-      const got = input.locks.get(want.lock);
-      const result = lockMatches(want, got, input, pins);
+      const result = lockMatches(want, input.locks.get(want.lock), input);
       checks.push(result.check);
       if (result.fact !== "yes" && allocationsLocked !== "no") allocationsLocked = result.fact;
     }
@@ -181,18 +186,12 @@ export function launchProof(input: LaunchInputs, pins: Pins): LaunchProof {
 }
 
 /** A listed lock must be a genuine Lockbox lock of this token holding exactly what the record says. */
-function lockMatches(
-  want: LaunchedLock,
-  got: { lock: Json | null; vault: Json | null } | undefined,
-  input: LaunchInputs,
-  pins: Pins,
-): { fact: Fact; check: Check } {
+function lockMatches(want: LaunchedLock, got: LockInput | undefined, input: LaunchInputs): { fact: Fact; check: Check } {
   const label = `Lock ${want.lock.slice(10, 22)} holds what the record says`;
-  if (!got?.lock) return { fact: "unknown", check: { ok: false, label, detail: "the lock could not be read" } };
-  const reading = readLock(got.lock, pins.lockboxTemplate);
-  const s = reading.state;
-  if (!reading.genuine || !s) return { fact: "no", check: { ok: false, label, detail: "not a genuine Lockbox lock" } };
-  const vault = got.vault ? readVault(got.vault) : null;
+  if (!got) return { fact: "unknown", check: { ok: false, label, detail: "the lock could not be read" } };
+  const s = got.reading.state;
+  if (!got.reading.genuine || !s) return { fact: "no", check: { ok: false, label, detail: "not a genuine Lockbox lock" } };
+  const vault = got.vault;
   if (!vault) return { fact: "unknown", check: { ok: false, label, detail: "the lock's vault could not be read" } };
   const mismatch = [
     vault.resource !== input.resourceId && "it holds a different token",

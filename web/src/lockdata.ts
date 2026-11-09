@@ -4,6 +4,7 @@
  */
 import type { NetConfig } from "./config";
 import { getSubstate, type Substate } from "./indexer";
+import { launchProof, recordLockIds, type LaunchProof } from "./launch";
 import {
   lockStatus,
   readLock,
@@ -71,4 +72,44 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Pr
     }),
   );
   return out;
+}
+
+/** A Launch Commitments token with everything its proof page needs. */
+export interface LoadedLaunch {
+  token: ResourceReading | null;
+  /** The record the token's `launched_by` names; null when it names none. */
+  recordId: string | null;
+  proof: LaunchProof | null;
+  /** The record's locks as read, for their live status and balances (unreadable ones left out). */
+  locks: LoadedLock[];
+  indexerVerified: boolean;
+}
+
+const COMPONENT_ID = /^component_[0-9a-f]{64}$/;
+
+/**
+ * Reads a token, the record its `launched_by` names, and every lock that record lists, then runs
+ * the proof. The token's pointer is only where to look: the proof decides whether it holds.
+ */
+export async function loadLaunch(net: NetConfig, resourceId: string, epoch: number): Promise<LoadedLaunch> {
+  const res = await getSubstate(net, resourceId);
+  const token = readResource(res.value);
+  const recordId = token?.launchedBy?.toLowerCase() ?? null;
+  if (!recordId || !COMPONENT_ID.test(recordId) || !net.launchTemplate) {
+    return { token, recordId: null, proof: null, locks: [], indexerVerified: res.indexerVerified };
+  }
+  const rec = await getSubstate(net, recordId);
+  const loaded = await mapLimit(recordLockIds(rec.value), 4, (id) => loadLock(net, id, epoch).catch(() => null));
+  const locks = loaded.filter((l): l is LoadedLock => l !== null);
+  const proof = launchProof(
+    {
+      recordId,
+      record: rec.value,
+      resourceId,
+      resource: res.value,
+      locks: new Map(locks.map((l) => [l.id, { reading: l.reading, vault: l.vault }])),
+    },
+    net.launchTemplate,
+  );
+  return { token, recordId, proof, locks, indexerVerified: res.indexerVerified && rec.indexerVerified && locks.every((l) => l.indexerVerified) };
 }

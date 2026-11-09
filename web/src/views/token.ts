@@ -25,6 +25,13 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
       h("h1", {}, title, r.symbol && r.name ? h("span", { class: "muted" }, ` (${r.symbol})`) : null),
       h("p", {}, addressLine(id)),
       h(
+        "div",
+        {},
+        r.launchedBy && net.launchTemplate
+          ? notice("info", "This token says it was launched with Launch Commitments. ", link(net, `launch/${id}`, "Check its launch proof"), ".")
+          : null,
+      ),
+      h(
         "dl",
         { class: "facts" },
         h("dt", {}, "Type"),

@@ -7,6 +7,7 @@ import { DEFAULT_NETWORK, NETWORKS, REPO_URL, type NetConfig, type NetworkName }
 import { h } from "./ui";
 import { createView } from "./views/create";
 import { homeView } from "./views/home";
+import { launchView } from "./views/launch";
 import { lockView } from "./views/lock";
 import { tokenView } from "./views/token";
 
@@ -61,6 +62,7 @@ async function render() {
   const valid = (prefix: string) => new RegExp(`^${prefix}_[0-9a-f]{64}$`, "i").test(route.id);
   if (route.page === "lock" && valid("component")) await lockView(route.net, route.id.toLowerCase(), main);
   else if (route.page === "token" && valid("resource")) await tokenView(route.net, route.id.toLowerCase(), main);
+  else if (route.page === "launch" && valid("resource")) await launchView(route.net, route.id.toLowerCase(), main);
   else if (route.page === "create") await createView(route.net, main);
   else await homeView(route.net, main);
 }

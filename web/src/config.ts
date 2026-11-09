@@ -14,6 +14,8 @@ export interface NetConfig {
   indexer: string;
   /** Lockbox template address (64 hex), or null before it is published on this network. */
   lockboxTemplate: string | null;
+  /** Launch Commitments template address (64 hex), or null before it is published on this network. */
+  launchTemplate: string | null;
   /** The value Sapient's `tari_getNetwork` reports for this network. */
   walletNetwork: string;
   /**
@@ -31,6 +33,7 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     network: Network.Esmeralda,
     indexer: "https://esme-indexer-a.ootle.tari.com",
     lockboxTemplate: "3f77a82e2eecb1795bc250ce919706519ea8feacc283d25f9e9740edc81b12b3",
+    launchTemplate: "ec0b8e8bf1ad8e05e0745e66868929070358da5dd975d72cd1031befa5141a8a",
     walletNetwork: "esmeralda",
     epochMinutes: { min: 32, typical: 60 }, // measured 32-48 minutes on 7 Nov 2026, ~83 on average 7-9 Nov
   },
@@ -40,6 +43,7 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     network: Network.MainNet,
     indexer: "https://indexer-a.ootle.tari.com",
     lockboxTemplate: null,
+    launchTemplate: null,
     walletNetwork: "mainnet",
     // An epoch is 10 L1 blocks on mainnet since height 126,000 (Minotari v6 consensus_constants.rs),
     // at a 2-minute block target: ~20 minutes. `min` leaves 10% for blocks running fast.

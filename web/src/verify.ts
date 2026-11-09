@@ -44,6 +44,8 @@ export interface ResourceReading {
   type: string;
   symbol: string | null;
   name: string | null;
+  /** The `launched_by` metadata a Launch Commitments token carries; a claim to check, not a fact. */
+  launchedBy: string | null;
   divisibility: number;
   totalSupply: bigint | null;
   /** Things the issuer can still do that would undo or block a lock. Empty = safe to lock. */
@@ -225,6 +227,7 @@ export function readResource(value: Json): ResourceReading | null {
     type: String(r.resource_type ?? "unknown"),
     symbol: str(meta.SYMBOL) ?? str(meta.symbol),
     name: str(meta.name) ?? str(meta.NAME),
+    launchedBy: str(meta.launched_by),
     divisibility: typeof r.divisibility === "number" ? r.divisibility : 0,
     totalSupply: r.total_supply === null ? null : toBigInt(r.total_supply),
     lockRisks,
