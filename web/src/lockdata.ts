@@ -4,7 +4,7 @@
  */
 import type { NetConfig } from "./config";
 import { getSubstate, type Substate } from "./indexer";
-import { launchProof, recordLockIds, type LaunchProof } from "./launch";
+import { launchProof, recordIsGenuine, recordLockIds, type LaunchProof } from "./launch";
 import {
   lockStatus,
   readLock,
@@ -88,8 +88,9 @@ export interface LoadedLaunch {
 const COMPONENT_ID = /^component_[0-9a-f]{64}$/;
 
 /**
- * Reads a token, the record its `launched_by` names, and every lock that record lists, then runs
- * the proof. The token's pointer is only where to look: the proof decides whether it holds.
+ * Reads a token, the record its `launched_by` names, and (only if that record's header is genuine)
+ * the at most 8 locks it lists, then runs the proof. The token's pointer is only where to look:
+ * the proof decides whether it holds.
  */
 export async function loadLaunch(net: NetConfig, resourceId: string, epoch: number): Promise<LoadedLaunch> {
   const res = await getSubstate(net, resourceId);
@@ -99,7 +100,8 @@ export async function loadLaunch(net: NetConfig, resourceId: string, epoch: numb
     return { token, recordId: null, proof: null, locks: [], indexerVerified: res.indexerVerified };
   }
   const rec = await getSubstate(net, recordId);
-  const loaded = await mapLimit(recordLockIds(rec.value), 4, (id) => loadLock(net, id, epoch).catch(() => null));
+  const ids = recordIsGenuine(rec.value, net.launchTemplate) === "yes" ? recordLockIds(rec.value) : [];
+  const loaded = await mapLimit(ids, 4, (id) => loadLock(net, id, epoch).catch(() => null));
   const locks = loaded.filter((l): l is LoadedLock => l !== null);
   const proof = launchProof(
     {
@@ -110,6 +112,7 @@ export async function loadLaunch(net: NetConfig, resourceId: string, epoch: numb
       locks: new Map(locks.map((l) => [l.id, { reading: l.reading, vault: l.vault }])),
     },
     net.launchTemplate,
+    epoch,
   );
   return { token, recordId, proof, locks, indexerVerified: res.indexerVerified && rec.indexerVerified && locks.every((l) => l.indexerVerified) };
 }

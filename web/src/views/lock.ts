@@ -4,7 +4,7 @@ import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
 import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, pill } from "../ui";
 import { formatAmount, type Check } from "../verify";
-import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, submit, TxBlocked, walletKey, walletNetwork } from "../wallet";
+import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, walletNetwork } from "../wallet";
 
 /** Past this many epochs ahead (centuries at any epoch length) no date is estimated. */
 const MAX_DATED_EPOCHS = 10_000_000n;
@@ -154,6 +154,11 @@ export function showTxError(net: NetConfig, status: HTMLElement, e: unknown) {
   status.append(" ", forget);
 }
 
+/** Disables or re-enables every control of a form while a transaction it reviewed is in flight. */
+export function setFormBusy(form: HTMLElement, busy: boolean) {
+  form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, select, button").forEach((el) => (el.disabled = busy));
+}
+
 /** Shown once the unlock epoch is reached: the beneficiary claims into their connected account. */
 function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
   const status = h("p", { class: "muted", "aria-live": "polite" });
@@ -170,6 +175,7 @@ function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
       if ((await walletKey(p, net)) !== l.reading.state!.beneficiary) {
         throw new Error("The connected wallet is not this lock's beneficiary.");
       }
+      await settleEarlier(p, net, (t) => (status.textContent = t));
       const ix = claimInstructions(net, account, l.id);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);

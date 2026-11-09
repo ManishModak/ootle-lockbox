@@ -220,6 +220,16 @@ function clearSaved(net: NetConfig, requestId: string) {
 }
 
 /**
+ * Follows a transaction saved by an earlier page load to its outcome, under the transaction lock,
+ * before anything new is prepared. Throws `TxBlocked` (possibly forgettable) when the user must
+ * look first; pressing again then continues. Flows call it before their own checks and dry run,
+ * so a spent balance or a failing dry run can never hide an earlier transaction.
+ */
+export async function settleEarlier(p: TariProvider, net: NetConfig, onStatus: (s: string) => void): Promise<void> {
+  await exclusive(net, () => settleSaved(p, net, onStatus));
+}
+
+/**
  * The "I've checked my wallet" action: forgets `requestId` if it is still the saved one. Runs
  * under the transaction lock, so it can't touch a transaction another tab is running.
  */

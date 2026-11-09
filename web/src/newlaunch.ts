@@ -13,6 +13,8 @@ export const MAX_NAME_BYTES = 64;
 export const MAX_IMAGE_URL_BYTES = 256;
 /** Locks may open at most this many epochs ahead (the template's MAX_LOCK_EPOCHS). */
 export const MAX_LOCK_EPOCHS = 530_000n;
+/** Amounts are u128 on chain. */
+const MAX_AMOUNT = 2n ** 128n - 1n;
 
 export interface LaunchLockInput {
   amount: bigint;
@@ -38,6 +40,7 @@ export function launchProblem(input: LaunchInput, currentEpoch: bigint): string 
   if (bytes(imageUrl) > MAX_IMAGE_URL_BYTES) return `The image URL is longer than ${MAX_IMAGE_URL_BYTES} bytes.`;
   if (imageUrl !== "" && !imageUrl.startsWith("https://")) return "The image URL must start with https://.";
   if (supply <= 0n) return "The supply must be more than zero.";
+  if (supply > MAX_AMOUNT) return "The supply is too large.";
   if (locks.length < 1 || locks.length > MAX_LAUNCH_LOCKS) return `Add 1–${MAX_LAUNCH_LOCKS} locks.`;
   let total = 0n;
   for (const [i, l] of locks.entries()) {
@@ -50,4 +53,22 @@ export function launchProblem(input: LaunchInput, currentEpoch: bigint): string 
   }
   if (total > supply) return "The locks add up to more than the supply.";
   return null;
+}
+
+/** Whether a genuine record (and its token's symbol and name) is the launch the user reviewed. */
+export function isThisLaunch(
+  record: { supply: bigint; createdAtEpoch: bigint; locks: LaunchLockInput[] },
+  symbol: string | null,
+  name: string | null,
+  input: LaunchInput,
+  reviewedAt: number,
+): boolean {
+  return (
+    record.createdAtEpoch >= BigInt(reviewedAt) &&
+    record.supply === input.supply &&
+    symbol === input.symbol &&
+    name === input.name &&
+    record.locks.length === input.locks.length &&
+    record.locks.every((l, i) => l.amount === input.locks[i].amount && l.unlockEpoch === input.locks[i].unlockEpoch && l.beneficiary === input.locks[i].beneficiary)
+  );
 }

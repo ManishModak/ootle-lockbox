@@ -7,8 +7,8 @@ import { currentEpoch, getSubstate } from "../indexer";
 import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
 import { errorText, epochsAsDuration, estimatedDate, formatDate, h, link, notice } from "../ui";
 import { formatAmount, parseAmount, readLock, readResource } from "../verify";
-import { balances, connect, dryRun, getProvider, lockInstructions, submit, walletKey, walletNetwork, type Balance } from "../wallet";
-import { checkList, showTxError } from "./lock";
+import { balances, connect, dryRun, getProvider, lockInstructions, settleEarlier, submit, walletKey, walletNetwork, type Balance } from "../wallet";
+import { checkList, setFormBusy, showTxError } from "./lock";
 import { notPublishedNotice } from "./home";
 
 export async function createView(net: NetConfig, root: HTMLElement) {
@@ -103,8 +103,11 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
     errors,
     go,
   );
+  // Only the newest review may show or sign; a review in flight blocks the form (see reviewBox).
+  let reviewSeq = 0;
   f.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const seq = ++reviewSeq;
     errors.textContent = "";
     review.replaceChildren();
     const b = chosen();
@@ -138,7 +141,8 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
       errors.textContent = problem;
       return;
     }
-    review.append(await reviewBox(net, p, account, b, amt!, t, ue!, ben!, memo.value, ben === myKey, now));
+    const box = await reviewBox(net, p, account, b, amt!, t, ue!, ben!, memo.value, ben === myKey, now, f);
+    if (seq === reviewSeq) review.append(box);
   });
   return h("div", {}, f, review);
 }
@@ -155,6 +159,7 @@ async function reviewBox(
   memo: string,
   isMe: boolean,
   epoch: number,
+  form: HTMLElement,
 ): Promise<HTMLElement> {
   const box = h("section", { class: "card review" }, h("h2", {}, "Review"));
   let risks: string[] = [];
@@ -189,7 +194,9 @@ async function reviewBox(
   const sign = h("button", { type: "button" }, "Lock tokens");
   sign.addEventListener("click", async () => {
     sign.setAttribute("disabled", "");
+    setFormBusy(form, true);
     try {
+      await settleEarlier(p, net, (t) => (status.textContent = t));
       // Time has passed since review: the reviewed epoch must still cover the chosen time.
       const needed = unlockEpochFor(net, await currentEpoch(net), target, Date.now());
       if (needed === null || needed > unlockEpoch) throw new Error("Time has moved on since you reviewed. Press Review again.");
@@ -203,6 +210,7 @@ async function reviewBox(
       else status.textContent = "Locked. Your lock will appear under Recent locks shortly.";
     } catch (e) {
       showTxError(net, status, e);
+      setFormBusy(form, false);
       sign.removeAttribute("disabled");
     }
   });

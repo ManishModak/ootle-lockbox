@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NETWORKS } from "./config";
-import { launchProblem, type LaunchInput } from "./newlaunch";
+import { isThisLaunch, launchProblem, type LaunchInput } from "./newlaunch";
 import { launchInstructions, locksLiteral } from "./wallet";
 
 const KEY = "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017";
@@ -38,6 +38,8 @@ describe("launchProblem", () => {
     expect(withChange((i) => (i.imageUrl = "http://example.org/a.png"))).toMatch(/https/);
     expect(withChange((i) => (i.imageUrl = "https://" + "a".repeat(250)))).toMatch(/longer/);
     expect(withChange((i) => (i.supply = 0n))).toMatch(/supply/);
+    expect(withChange((i) => (i.supply = 2n ** 128n))).toMatch(/too large/);
+    expect(withChange((i) => (i.supply = 2n ** 128n - 1n))).toBeNull();
     expect(withChange((i) => (i.locks = []))).toMatch(/1–8 locks/);
     expect(withChange((i) => (i.locks = Array(9).fill(i.locks[1])))).toMatch(/1–8 locks/);
     expect(withChange((i) => (i.locks[1].amount = 0n))).toMatch(/Lock 2: the amount/);
@@ -72,5 +74,18 @@ describe("launch transaction", () => {
     expect(text.indexOf('"launch"')).toBeLessThan(text.indexOf('"deposit"'));
     expect(text).toContain(NETWORKS.esmeralda.launchTemplate!);
     expect(() => launchInstructions(NETWORKS.mainnet, account, valid())).toThrow(/not published/);
+  });
+});
+
+describe("isThisLaunch", () => {
+  const record = () => ({ supply: valid().supply, createdAtEpoch: NOW, locks: valid().locks });
+  it("matches the reviewed launch and nothing else", () => {
+    expect(isThisLaunch(record(), "LCDEMO", "Launch Commitments Demo", valid(), 12967)).toBe(true);
+    expect(isThisLaunch(record(), "LCDEMO", "Launch Commitments Demo", valid(), 12968)).toBe(false); // made before the review
+    expect(isThisLaunch(record(), "OTHER", "Launch Commitments Demo", valid(), 12967)).toBe(false);
+    expect(isThisLaunch({ ...record(), supply: 1n }, "LCDEMO", "Launch Commitments Demo", valid(), 12967)).toBe(false);
+    const swapped = record();
+    swapped.locks = [...swapped.locks].reverse();
+    expect(isThisLaunch(swapped, "LCDEMO", "Launch Commitments Demo", valid(), 12967)).toBe(false);
   });
 });

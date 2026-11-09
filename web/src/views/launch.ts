@@ -69,7 +69,18 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
       ...fact("Fixed supply", p.fixedSupply, "Nobody can mint or burn it."),
       ...fact("Rules frozen", p.rulesFrozen, "No owner, every rule and updater locked, no transfer hook."),
       ...fact("Issued by Launch Commitments", p.issued, "Its launch record and the token name each other."),
-      ...fact("Allocations locked", p.allocationsLocked, "Each lock below is a genuine Lockbox lock holding what the record says."),
+      ...fact("Locked at launch", p.lockedAtLaunch, "Each lock below is a genuine Lockbox lock this launch made, with these terms."),
+      h("dt", {}, "Still locked now"),
+      h(
+        "dd",
+        {},
+        p.stillLocked === null
+          ? p.lockedAtLaunch === "yes" || p.lockedAtLaunch === "unknown"
+            ? pill("Unable to verify", "warn")
+            : "—"
+          : `${formatAmount(p.stillLocked, div)} ${sym}`,
+        h("span", { class: "muted" }, " Locks open at their epoch, then their beneficiary can claim."),
+      ),
       h("dt", {}, "Supply"),
       h("dd", {}, t.totalSupply === null ? "unknown" : `${formatAmount(t.totalSupply, div)} ${sym}`),
       h("dt", {}, "Launch record"),

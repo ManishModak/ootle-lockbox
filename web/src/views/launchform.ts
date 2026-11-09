@@ -5,12 +5,13 @@
  */
 import type { NetConfig } from "../config";
 import { currentEpoch, getSubstate } from "../indexer";
-import { LAUNCH_DECIMALS, launchProblem, MAX_LAUNCH_LOCKS, type LaunchInput, type LaunchLockInput } from "../newlaunch";
+import { isThisLaunch, LAUNCH_DECIMALS, launchProblem, MAX_LAUNCH_LOCKS, type LaunchInput, type LaunchLockInput } from "../newlaunch";
 import { MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
 import { errorText, estimatedDate, formatDate, h, link, notice } from "../ui";
-import { formatAmount, parseAmount, readResource } from "../verify";
-import { balances, connect, dryRun, getProvider, launchInstructions, submit, walletKey, walletNetwork } from "../wallet";
-import { showTxError } from "./lock";
+import { loadLaunch } from "../lockdata";
+import { formatAmount, parseAmount } from "../verify";
+import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, walletKey, walletNetwork } from "../wallet";
+import { setFormBusy, showTxError } from "./lock";
 
 const CLI_URL = "https://github.com/ManishModak/ootle-lockbox"; // TODO: the Launch Commitments repo once public
 
@@ -45,6 +46,8 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
       const wn = await walletNetwork(p);
       if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}. Switch it to ${net.label}, or open this page for ${wn}.`);
       const account = await connect(p);
+      // An earlier launch whose outcome is unknown is settled first, even if its fee left too little for a new one.
+      await settleEarlier(p, net, (t) => (status.textContent = t));
       const [list, acct, epoch, myKey] = await Promise.all([balances(p), getSubstate(net, account), currentEpoch(net), walletKey(p, net)]);
       const owner = String((acct.value as any)?.Component?.header?.owner_rule?.ByPublicKey ?? "").toLowerCase();
       if (!myKey) throw new Error(`Could not read your wallet's ${net.label} address.`);
@@ -55,7 +58,7 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
       }
       intro.replaceWith(form(net, p, account, myKey, epoch));
     } catch (e) {
-      status.textContent = errorText(e);
+      showTxError(net, status, e);
       btn.removeAttribute("disabled");
     }
   });
@@ -123,8 +126,11 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, epoch
     h("button", { type: "submit" }, "Review"),
   );
 
+  // Only the newest review may show or sign; signing blocks the form (see reviewBox).
+  let reviewSeq = 0;
   f.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const seq = ++reviewSeq;
     errors.textContent = "";
     review.replaceChildren();
     let now: number;
@@ -134,12 +140,13 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, epoch
       errors.textContent = errorText(err);
       return;
     }
+    if (seq !== reviewSeq) return;
     const parsed = readForm(net, myKey, now, { symbol, name, image, supply }, rows);
     if (typeof parsed === "string") {
       errors.textContent = parsed;
       return;
     }
-    review.append(reviewBox(net, p, account, myKey, parsed.input, parsed.targets, now));
+    review.append(reviewBox(net, p, account, myKey, parsed.input, parsed.targets, now, f));
   });
   return h("div", {}, f, review);
 }
@@ -171,7 +178,16 @@ function readForm(
   return launchProblem(input, BigInt(now)) ?? { input, targets };
 }
 
-function reviewBox(net: NetConfig, p: Provider, account: string, myKey: string, input: LaunchInput, targets: number[], epoch: number): HTMLElement {
+function reviewBox(
+  net: NetConfig,
+  p: Provider,
+  account: string,
+  myKey: string,
+  input: LaunchInput,
+  targets: number[],
+  epoch: number,
+  form: HTMLElement,
+): HTMLElement {
   const sym = input.symbol;
   const locked = input.locks.reduce((s, l) => s + l.amount, 0n);
   const box = h("section", { class: "card review" }, h("h2", {}, "Review"));
@@ -222,7 +238,9 @@ function reviewBox(net: NetConfig, p: Provider, account: string, myKey: string, 
   const sign = h("button", { type: "button" }, "Launch");
   sign.addEventListener("click", async () => {
     sign.setAttribute("disabled", "");
+    setFormBusy(form, true);
     try {
+      await settleEarlier(p, net, (t) => (status.textContent = t));
       // Time has passed since review: each reviewed epoch must still cover its chosen time.
       const now = await currentEpoch(net);
       input.locks.forEach((l, i) => {
@@ -234,11 +252,12 @@ function reviewBox(net: NetConfig, p: Provider, account: string, myKey: string, 
       await dryRun(p, ix);
       const result = await submit(p, net, ix, (t) => (status.textContent = t));
       status.textContent = "Launched. Finding your token…";
-      const token = await findLaunchedToken(net, result);
+      const token = await findLaunchedToken(net, result, input, epoch);
       if (token) location.hash = `#/${net.name}/launch/${token}`;
       else status.textContent = "Launched. Find the new token in your wallet, then open its page here to see the proof.";
     } catch (e) {
       showTxError(net, status, e);
+      setFormBusy(form, false);
       sign.removeAttribute("disabled");
     }
   });
@@ -246,15 +265,20 @@ function reviewBox(net: NetConfig, p: Provider, account: string, myKey: string, 
   return box;
 }
 
-/** The wallet's result shape isn't documented, so take any resource in it that names a launch record. */
-async function findLaunchedToken(net: NetConfig, result: unknown): Promise<string | null> {
+/**
+ * The wallet's result shape isn't documented and can carry any text (an image URL, say), so a
+ * resource address in it is only a candidate: it counts only if its full launch proof passes and
+ * its record is this launch (same terms, created no earlier than the reviewed epoch).
+ */
+async function findLaunchedToken(net: NetConfig, result: unknown, input: LaunchInput, reviewedAt: number): Promise<string | null> {
   const text = JSON.stringify(result, (_, v) => (typeof v === "bigint" ? v.toString() : v)) ?? "";
-  const candidates = [...new Set(text.match(/resource_[0-9a-f]{64}/g) ?? [])].filter((r) => r !== NATIVE_TARI);
+  const candidates = [...new Set(text.match(/resource_[0-9a-f]{64}/g) ?? [])].filter((r) => r !== NATIVE_TARI).slice(0, 10);
   for (const c of candidates) {
     try {
-      if (readResource((await getSubstate(net, c)).value)?.launchedBy) return c;
+      const l = await loadLaunch(net, c, await currentEpoch(net));
+      if (l.proof?.issued === "yes" && l.proof.record && isThisLaunch(l.proof.record, l.token?.symbol ?? null, l.token?.name ?? null, input, reviewedAt)) return c;
     } catch {
-      // not readable yet or not a token
+      // not readable yet, or not a token
     }
   }
   return null;
