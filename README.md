@@ -65,7 +65,7 @@ Every push to `main` deploys the site to GitHub Pages (`.github/workflows/pages.
 
 | Network | Lockbox template |
 |---|---|
-| Esmeralda testnet | `template_d7f5ee289465580308d3074a0892d90eefb4bf157200171692bdf47cc9473832` |
+| Esmeralda testnet | `template_3f77a82e2eecb1795bc250ce919706519ea8feacc283d25f9e9740edc81b12b3` (9 Nov; replaced `template_d7f5ee28…` from 7 Nov, which lacked the beneficiary-key check) |
 | Mainnet | published on 11 Nov 2026 (address added here) |
 
 ## Licence

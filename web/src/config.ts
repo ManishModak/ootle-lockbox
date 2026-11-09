@@ -30,7 +30,7 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     label: "Esmeralda testnet",
     network: Network.Esmeralda,
     indexer: "https://esme-indexer-a.ootle.tari.com",
-    lockboxTemplate: "d7f5ee289465580308d3074a0892d90eefb4bf157200171692bdf47cc9473832",
+    lockboxTemplate: "3f77a82e2eecb1795bc250ce919706519ea8feacc283d25f9e9740edc81b12b3",
     walletNetwork: "esmeralda",
     epochMinutes: { min: 32, typical: 60 }, // measured 32-48 minutes on 7 Nov 2026, ~83 on average 7-9 Nov
   },
