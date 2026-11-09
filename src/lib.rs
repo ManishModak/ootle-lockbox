@@ -38,7 +38,7 @@ mod lockbox {
     impl Lockbox {
         /// Locks `tokens` until `unlock_epoch`; only `beneficiary` may claim them afterwards.
         /// Panics if the bucket is empty or holds blinded confidential funds, the epoch is not in
-        /// the future, or the memo is too long.
+        /// the future, the memo is too long, or the beneficiary is not a valid public key.
         pub fn lock(
             tokens: Bucket,
             unlock_epoch: u64,
@@ -51,6 +51,11 @@ mod lockbox {
             tokens.assert_contains_no_confidential_funds();
             assert!(unlock_epoch > now, "Unlock epoch {unlock_epoch} must be after the current epoch {now}");
             assert!(memo.len() <= MAX_MEMO_BYTES, "Memo is longer than {MAX_MEMO_BYTES} bytes");
+            // Nobody can sign for a non-canonical or identity key, so its lock could never be claimed.
+            assert!(
+                tari_template_lib::intrinsics::ristretto_is_canonical(&beneficiary) && !beneficiary.is_zero(),
+                "Beneficiary {beneficiary} is not a valid public key"
+            );
 
             // Allocate the address first so the creation event can name the lock.
             let allocation = CallerContext::allocate_component_address(None);

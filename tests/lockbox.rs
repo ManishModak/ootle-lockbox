@@ -158,12 +158,17 @@ fn lock_rejects_bad_inputs() {
     let lockbox = env.test.get_template_address("Lockbox");
     let owner = env.owner.0;
     let key = public_key(&env.owner);
+    // Keys nobody can sign for: the identity point and a non-canonical encoding.
+    let identity = RistrettoPublicKeyBytes::try_from(&[0u8; 32][..]).unwrap();
+    let non_canonical = RistrettoPublicKeyBytes::try_from(&[0xffu8; 32][..]).unwrap();
     let cases = [
-        (Amount::new(LOCKED), 10u64, "x".to_string(), "must be after the current epoch"),
-        (Amount::ZERO, UNLOCK_EPOCH, "x".to_string(), "Cannot lock an empty bucket"),
-        (Amount::new(LOCKED), UNLOCK_EPOCH, "m".repeat(281), "Memo is longer than 280 bytes"),
+        (Amount::new(LOCKED), 10u64, key, "x".to_string(), "must be after the current epoch"),
+        (Amount::ZERO, UNLOCK_EPOCH, key, "x".to_string(), "Cannot lock an empty bucket"),
+        (Amount::new(LOCKED), UNLOCK_EPOCH, key, "m".repeat(281), "Memo is longer than 280 bytes"),
+        (Amount::new(LOCKED), UNLOCK_EPOCH, identity, "x".to_string(), "not a valid public key"),
+        (Amount::new(LOCKED), UNLOCK_EPOCH, non_canonical, "x".to_string(), "not a valid public key"),
     ];
-    for (amount, unlock_epoch, memo, expected) in cases {
+    for (amount, unlock_epoch, key, memo, expected) in cases {
         let reason = env.test.execute_expect_failure(
             env.test
                 .transaction()
