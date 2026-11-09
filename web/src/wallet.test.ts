@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./config";
-import { dryRun, engineVerdict, forgetEarlierTransaction, submit, TxBlocked } from "./wallet";
+import { dryRun, engineVerdict, forgetEarlierTransaction, submit, TxBlocked, txHash } from "./wallet";
 
 const net = NETWORKS.esmeralda;
 const accept = { finalize: { result: { Accept: {} } } };
@@ -84,8 +84,24 @@ describe("engineVerdict / dryRun", () => {
   });
 });
 
+describe("txHash", () => {
+  it("reads only the finalize result's own transaction hash", () => {
+    const hash = "61".repeat(32);
+    expect(txHash({ finalize: { transaction_hash: hash.toUpperCase() } })).toBe(hash);
+    expect(txHash({ result: { finalize: { transaction_hash: hash } } })).toBe(hash);
+    expect(txHash({ finalize: { transaction_hash: "not-a-hash" } })).toBeNull();
+    expect(txHash({ transaction_hash: hash })).toBeNull();
+  });
+});
+
 describe("submit", () => {
-  const run = (w: ReturnType<typeof fakeWallet>) => settle(submit(w.p, net, [], () => {}));
+  const run = (w: ReturnType<typeof fakeWallet>, here = () => true) => settle(submit(w.p, net, [], () => {}, here));
+
+  it("sends nothing once the user has left the page", async () => {
+    const w = fakeWallet({ status: () => ({ status: "submitted", result: accept }) });
+    expect(errOf(await run(w, () => false))?.message).toMatch(/left the page/);
+    expect(w.creates()).toBe(0);
+  });
 
   it("recovers a lost submit response by polling the same request", async () => {
     let done = false;

@@ -3,11 +3,11 @@
  * the token's rules, dry-run, then sign. Ends on the new lock's proof page.
  */
 import { MAX_MEMO_BYTES, REPO_URL, type NetConfig } from "../config";
-import { currentEpoch, getSubstate } from "../indexer";
+import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, epochsAsDuration, estimatedDate, formatDate, h, link, notice } from "../ui";
-import { formatAmount, parseAmount, readLock, readResource } from "../verify";
-import { balances, connect, dryRun, getProvider, lockInstructions, settleEarlier, submit, walletKey, walletNetwork, type Balance } from "../wallet";
+import { errorText, epochsAsDuration, estimatedDate, formatDate, h, link, notice, onThisPage } from "../ui";
+import { formatAmount, parseAmount, readResource } from "../verify";
+import { balances, connect, dryRun, getProvider, lockInstructions, settleEarlier, submit, txHash, walletKey, walletNetwork, type Balance } from "../wallet";
 import { checkList, setFormBusy, showTxError } from "./lock";
 import { notPublishedNotice } from "./home";
 
@@ -37,6 +37,8 @@ export async function createView(net: NetConfig, root: HTMLElement) {
       const wn = await walletNetwork(p);
       if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}. Switch it to ${net.label}, or open this page for ${wn}.`);
       const account = await connect(p);
+      // An earlier lock whose outcome is unknown is settled first, even if it spent the balance this form needs.
+      await settleEarlier(p, net, (t) => (status.textContent = t));
       const [list, acct, epoch, myKey] = await Promise.all([balances(p), getSubstate(net, account), currentEpoch(net), walletKey(p, net)]);
       // "Me" is the wallet's own key. The indexer's view of the account must agree, which also
       // confirms this key is the one that signs for the account (and so can claim).
@@ -195,6 +197,7 @@ async function reviewBox(
   sign.addEventListener("click", async () => {
     sign.setAttribute("disabled", "");
     setFormBusy(form, true);
+    const here = onThisPage();
     try {
       await settleEarlier(p, net, (t) => (status.textContent = t));
       // Time has passed since review: the reviewed epoch must still cover the chosen time.
@@ -203,10 +206,10 @@ async function reviewBox(
       const ix = lockInstructions(net, account, b.resourceAddress, amount, unlockEpoch, beneficiary, memo);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);
-      const result = await submit(p, net, ix, (t) => (status.textContent = t));
+      const result = await submit(p, net, ix, (t) => (status.textContent = t), here);
       status.textContent = "Locked. Finding your lock…";
       const lock = await findNewLock(net, result);
-      if (lock) location.hash = `#/${net.name}/lock/${lock}`;
+      if (lock && here()) location.hash = `#/${net.name}/lock/${lock}`;
       else status.textContent = "Locked. Your lock will appear under Recent locks shortly.";
     } catch (e) {
       showTxError(net, status, e);
@@ -218,16 +221,17 @@ async function reviewBox(
   return box;
 }
 
-/** The wallet's result shape isn't documented, so take any component address in it that is a genuine lock. */
+/**
+ * The lock this transaction made, from the LockCreated event the pinned template emitted in it.
+ * Addresses elsewhere in the result can come from the user's own text (the memo), so they are
+ * never used. Null when the result has no hash or the indexer doesn't show the event yet.
+ */
 async function findNewLock(net: NetConfig, result: unknown): Promise<string | null> {
-  const text = JSON.stringify(result, (_, v) => (typeof v === "bigint" ? v.toString() : v)) ?? "";
-  const candidates = [...new Set(text.match(/component_[0-9a-f]{64}/g) ?? [])];
-  for (const c of candidates) {
-    try {
-      if (readLock((await getSubstate(net, c)).value, net.lockboxTemplate ?? "").genuine) return c;
-    } catch {
-      // not readable yet or not a lock
-    }
+  const tx = txHash(result);
+  if (!tx || !net.lockboxTemplate) return null;
+  try {
+    return await addressFromTxEvent(net, net.lockboxTemplate, "Lockbox.LockCreated", tx, "lock", "component");
+  } catch {
+    return null; // the indexer failed; the lock still shows under Recent locks
   }
-  return null;
 }

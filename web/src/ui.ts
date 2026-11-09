@@ -22,6 +22,22 @@ export function h(tag: string, attrs: Attrs = {}, ...children: Child[]): HTMLEle
   return el;
 }
 
+let pageNumber = 0;
+
+/** Called by the router each time it renders a page. */
+export function startPage() {
+  pageNumber++;
+}
+
+/**
+ * Captures the page being shown. The returned check turns false once the router renders another
+ * page, so a flow started here never sends, navigates or reloads after the user has left.
+ */
+export function onThisPage(): () => boolean {
+  const n = pageNumber;
+  return () => n === pageNumber;
+}
+
 /** Shortens a long address for display; the full value stays in the title and copy button. */
 export function short(id: string, keep = 8): string {
   const [prefix, rest] = id.includes("_") ? [id.slice(0, id.indexOf("_") + 1), id.slice(id.indexOf("_") + 1)] : ["", id];

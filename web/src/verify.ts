@@ -27,9 +27,14 @@ export interface LockState {
   claimed: boolean;
 }
 
+/** A three-way verdict: an observed contradiction is "no", missing data is "unknown". */
+export type Fact = "yes" | "no" | "unknown";
+
 export interface LockReading {
   checks: Check[];
   genuine: boolean;
+  /** Like `genuine`, but "unknown" when every failed check failed only because its header field is missing. */
+  provenance: Fact;
   state: LockState | null;
 }
 
@@ -94,49 +99,36 @@ const HEX64 = /^[0-9a-f]{64}$/;
 /** The engine's virtual resource whose NFT ids are public keys: `Require(this badge)` = "signed by this key". */
 export const PUBLIC_KEY_BADGE_RESOURCE = "resource_0100000000000000000000000000000000000000000000000000000000000000";
 
-/** Reads the component's header and state. Unknown shapes fail closed (genuine = false). */
+/**
+ * Reads the component's header and state. Unknown shapes fail closed (genuine = false);
+ * `provenance` also says whether a failure is an observed contradiction or only missing data.
+ */
 export function readLock(value: Json, lockboxTemplate: string): LockReading {
-  const checks: Check[] = [];
   const comp = isObj(value) && isObj(value.Component) ? value.Component : null;
   const header = comp && isObj(comp.header) ? comp.header : null;
   if (!comp || !header) {
-    return { checks: [{ ok: false, label: "This address is not a component" }], genuine: false, state: null };
+    return { checks: [{ ok: false, label: "This address is not a component" }], genuine: false, provenance: "no", state: null };
   }
+  // Each check notes whether the data it reads is present; a failure on missing data isn't a contradiction.
+  const results: { check: Check; present: boolean }[] = [];
+  const add = (present: boolean, ok: boolean, label: string, detail: string) => results.push({ check: { ok, label, detail: ok ? undefined : detail }, present });
+  const has = (k: string) => header[k] !== undefined;
 
   const template = String(header.template_address ?? "").toLowerCase();
-  checks.push({
-    ok: template === lockboxTemplate.toLowerCase(),
-    label: "Runs the Lockbox template",
-    detail: template === lockboxTemplate.toLowerCase() ? undefined : `template ${template || "unknown"}`,
-  });
-  checks.push({
-    ok: header.owner_rule === "None",
-    label: "Has no owner",
-    detail: header.owner_rule === "None" ? undefined : "an owner could bypass its rules",
-  });
-  checks.push({
-    ok: header.upgrade_rule === "Locked",
-    label: "Can never be upgraded",
-    detail: header.upgrade_rule === "Locked" ? undefined : "an upgradable component can fake being a Lockbox",
-  });
+  add(has("template_address"), template === lockboxTemplate.toLowerCase(), "Runs the Lockbox template", `template ${template || "unknown"}`);
+  add(has("owner_rule"), header.owner_rule === "None", "Has no owner", "an owner could bypass its rules");
+  add(has("upgrade_rule"), header.upgrade_rule === "Locked", "Can never be upgraded", "an upgradable component can fake being a Lockbox");
 
   const state = parseState(comp.body);
-  checks.push({ ok: state !== null, label: "Lock data is readable" });
+  results.push({ check: { ok: state !== null, label: "Lock data is readable" }, present: comp.body !== undefined });
   if (state) {
-    const validKey = isValidPublicKey(state.beneficiary);
-    checks.push({
-      ok: validKey,
-      label: "The beneficiary key is a real public key",
-      detail: validKey ? undefined : "nobody can ever sign for it, so the tokens can't be claimed",
-    });
-    const ok = claimRuleBindsTo(header.access_rules, state.beneficiary);
-    checks.push({
-      ok,
-      label: "Only the beneficiary can claim",
-      detail: ok ? undefined : "the claim rule does not match the stored beneficiary",
-    });
+    add(true, isValidPublicKey(state.beneficiary), "The beneficiary key is a real public key", "nobody can ever sign for it, so the tokens can't be claimed");
+    add(has("access_rules"), claimRuleBindsTo(header.access_rules, state.beneficiary), "Only the beneficiary can claim", "the claim rule does not match the stored beneficiary");
   }
-  return { checks, genuine: checks.every((c) => c.ok), state };
+  const checks = results.map((r) => r.check);
+  const genuine = checks.every((c) => c.ok);
+  const contradicted = results.some((r) => !r.check.ok && r.present);
+  return { checks, genuine, provenance: genuine ? "yes" : contradicted ? "no" : "unknown", state };
 }
 
 function parseState(body: Json): LockState | null {

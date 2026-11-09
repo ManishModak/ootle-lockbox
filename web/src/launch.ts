@@ -17,7 +17,9 @@
  * non-upgradable. Every check is three-way: an explicit mismatch fails ("no"), a field that is
  * missing or unreadable is "unknown", and only a full set of passes is "yes".
  */
-import { cborHex, lockStatus, toBigInt, toEpoch, type Check, type LockReading, type VaultBalance } from "./verify";
+import { cborHex, lockStatus, toBigInt, toEpoch, type Check, type Fact, type LockReading, type VaultBalance } from "./verify";
+
+export type { Fact };
 
 type Json = unknown;
 const isObj = (x: Json): x is Record<string, Json> => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -56,8 +58,6 @@ export interface LaunchInputs {
   locks: Map<string, LockInput>;
 }
 
-export type Fact = "yes" | "no" | "unknown";
-
 export interface LaunchProof {
   fixedSupply: Fact;
   rulesFrozen: Fact;
@@ -90,9 +90,17 @@ function fold(checks: TriCheck[]): Fact {
 }
 
 /** `cond(x)` when field `x` is present, else unknown. */
-function when<T>(x: T | undefined, cond: (x: T) => boolean): Tri {
+function when<T>(x: T | undefined, cond: (x: T) => Tri): Tri {
   return x === undefined ? null : cond(x);
 }
+
+/** All of `parts`: false if any is false, else null if any is unknown, else true. */
+function all(...parts: Tri[]): Tri {
+  return parts.includes(false) ? false : parts.includes(null) ? null : true;
+}
+
+/** `obj[k] === want`, or unknown when `obj` lacks `k`. */
+const fieldIs = (obj: Record<string, Json>, k: string, want: Json): Tri => when(obj[k], (v) => v === want);
 
 /** Addresses in raw component state are tagged byte strings: 128 component, 131 resource. */
 function taggedAddress(x: Json, tag: number, prefix: string): string | null {
@@ -141,7 +149,14 @@ function recordChecks(value: Json, template: string): { checks: TriCheck[]; reco
     { ok: when(field("owner_rule"), (o) => o === "None"), label: "The record has no owner" },
     { ok: when(field("upgrade_rule"), (u) => u === "Locked"), label: "The record can never be upgraded", detail: "an upgradable component can fake being a record" },
     {
-      ok: when(field("access_rules"), (r) => isObj(r) && r.default === "DenyAll" && isObj(r.method_access) && Object.keys(r.method_access).join() === "info" && r.method_access.info === "AllowAll"),
+      ok: when(field("access_rules"), (r) =>
+        !isObj(r)
+          ? false
+          : all(
+              fieldIs(r, "default", "DenyAll"),
+              when(r.method_access, (m) => isObj(m) && Object.keys(m).join() === "info" && m.info === "AllowAll"),
+            ),
+      ),
       label: "The record is read-only",
     },
     { ok: record !== null ? true : null, label: "The record is readable" },
@@ -183,8 +198,11 @@ const LAUNCHED_RULES: Record<string, string> = {
   auth_hook_updater: "Locked",
 };
 
-const sameRules = (rules: Json) =>
-  isObj(rules) && Object.keys(rules).length === Object.keys(LAUNCHED_RULES).length && Object.keys(rules).every((k) => rules[k] === LAUNCHED_RULES[k]);
+/** Exactly LAUNCHED_RULES: an extra or different rule is false; a missing one is unknown. */
+const sameRules = (rules: Json): Tri =>
+  !isObj(rules) || Object.keys(rules).some((k) => !(k in LAUNCHED_RULES))
+    ? false
+    : all(...Object.entries(LAUNCHED_RULES).map(([k, want]) => fieldIs(rules, k, want)));
 
 /** Runs every check and folds them into the facts. `currentEpoch` decides which locks are still locked. */
 export function launchProof(input: LaunchInputs, launchTemplate: string, currentEpoch: number): LaunchProof {
@@ -194,7 +212,7 @@ export function launchProof(input: LaunchInputs, launchTemplate: string, current
   const r = isObj(input.resource) && isObj(input.resource.Resource) ? input.resource.Resource : null;
   const field = (k: string) => (r && k in r ? r[k] : undefined);
   const meta = field("metadata");
-  const launchedBy = isObj(meta) ? meta.launched_by : undefined;
+  const launchedBy = when(meta, (m) => (isObj(m) ? when(m.launched_by, (b) => b === input.recordId) : false));
   const supply = field("total_supply") === undefined ? undefined : toBigInt(field("total_supply"));
 
   const ownerless: TriCheck = { ok: when(field("owner_rule"), (o) => o === "None"), label: "The token has no owner" };
@@ -205,11 +223,11 @@ export function launchProof(input: LaunchInputs, launchTemplate: string, current
     rulesExact,
     noHook,
     {
-      ok: r === null ? null : field("resource_type") === "Fungible" && field("divisibility") === 18,
+      ok: r === null ? null : all(fieldIs(r, "resource_type", "Fungible"), fieldIs(r, "divisibility", 18)),
       label: "A fungible token with 18 decimals",
     },
     {
-      ok: record === null || r === null ? null : launchedBy === input.recordId && record.resource === input.resourceId,
+      ok: record === null || r === null ? null : all(launchedBy, record.resource === input.resourceId),
       label: "The record and the token name each other",
     },
     { ok: record === null || supply === undefined || supply === null ? null : supply === record.supply, label: "The supply matches the record" },
@@ -241,7 +259,7 @@ function lockCheck(want: LaunchedLock, got: LockInput | undefined, input: Launch
   if (!got) return { check: { ok: null, label }, stillLocked: null };
   const s = got.reading.state;
   if (!s) return { check: { ok: null, label }, stillLocked: null };
-  if (!got.reading.genuine) return { check: { ok: false, label, detail: "not a genuine Lockbox lock" }, stillLocked: null };
+  if (got.reading.provenance === "no") return { check: { ok: false, label, detail: "not a genuine Lockbox lock" }, stillLocked: null };
   const mismatch = [
     got.vault && got.vault.resource !== input.resourceId && "it holds a different token",
     s.lockedAmount !== want.amount && "the locked amount differs",
@@ -250,6 +268,7 @@ function lockCheck(want: LaunchedLock, got: LockInput | undefined, input: Launch
     s.memo !== `launch ${input.recordId}` && "it was not made by this launch",
   ].filter((x): x is string => typeof x === "string");
   if (mismatch.length > 0) return { check: { ok: false, label, detail: mismatch.join("; ") }, stillLocked: null };
+  if (got.reading.provenance === "unknown") return { check: { ok: null, label }, stillLocked: null };
   if (!got.vault || got.vault.amount === null) return { check: { ok: null, label }, stillLocked: null };
   if (lockStatus(s, currentEpoch) !== "locked") return { check: { ok: true, label }, stillLocked: 0n };
   // Nothing can leave a genuine lock before its epoch, so a different live balance means the data is wrong.

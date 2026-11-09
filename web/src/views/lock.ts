@@ -2,7 +2,7 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
-import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, pill } from "../ui";
+import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, onThisPage, pill } from "../ui";
 import { formatAmount, type Check } from "../verify";
 import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, walletNetwork } from "../wallet";
 
@@ -166,22 +166,23 @@ function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
   const box = h("section", { class: "card" }, h("h2", {}, "Claim"), h("p", {}, "Only the beneficiary's wallet can claim. The tokens go to the account you connect."), btn, status);
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
+    const here = onThisPage();
     try {
       const p = await getProvider();
       if (!p) throw new Error("Sapient wallet not found. Install it, or claim with lockbox-cli.");
       const wn = await walletNetwork(p);
       if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}; this lock is on ${net.label}.`);
       const account = await connect(p);
+      await settleEarlier(p, net, (t) => (status.textContent = t));
       if ((await walletKey(p, net)) !== l.reading.state!.beneficiary) {
         throw new Error("The connected wallet is not this lock's beneficiary.");
       }
-      await settleEarlier(p, net, (t) => (status.textContent = t));
       const ix = claimInstructions(net, account, l.id);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);
-      await submit(p, net, ix, (t) => (status.textContent = t));
+      await submit(p, net, ix, (t) => (status.textContent = t), here);
       status.textContent = "Claimed. Reloading…";
-      setTimeout(() => location.reload(), 1500);
+      setTimeout(() => here() && location.reload(), 1500);
     } catch (e) {
       showTxError(net, status, e);
       btn.removeAttribute("disabled");

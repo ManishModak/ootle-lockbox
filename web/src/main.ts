@@ -4,12 +4,13 @@
  */
 import "./style.css";
 import { DEFAULT_NETWORK, NETWORKS, REPO_URL, type NetConfig, type NetworkName } from "./config";
-import { h } from "./ui";
+import { h, startPage } from "./ui";
 import { createView } from "./views/create";
 import { homeView } from "./views/home";
 import { launchView } from "./views/launch";
 import { launchFormView } from "./views/launchform";
 import { lockView } from "./views/lock";
+import { pendingBanner } from "./views/pending";
 import { tokenView } from "./views/token";
 
 interface Route {
@@ -56,10 +57,13 @@ function footer(): HTMLElement {
 }
 
 async function render() {
+  startPage();
   const route = parseRoute();
   const main = h("main");
   document.body.replaceChildren(header(route.net), main, footer());
   window.scrollTo(0, 0);
+  const banner = pendingBanner(route.net);
+  if (banner) main.append(banner);
   const valid = (prefix: string) => new RegExp(`^${prefix}_[0-9a-f]{64}$`, "i").test(route.id);
   if (route.page === "lock" && valid("component")) await lockView(route.net, route.id.toLowerCase(), main);
   else if (route.page === "token" && valid("resource")) await tokenView(route.net, route.id.toLowerCase(), main);

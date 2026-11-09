@@ -154,6 +154,13 @@ export function engineVerdict(result: unknown): "accepted" | { rejected: string 
   return { rejected: typeof reason === "string" ? reason : JSON.stringify(reason).slice(0, 300) };
 }
 
+/** The transaction hash in a submitted result (`finalize.transaction_hash`), or null if it has none. */
+export function txHash(result: unknown): string | null {
+  const r = result as any;
+  const hash = (r?.finalize ?? r?.result?.finalize)?.transaction_hash;
+  return typeof hash === "string" && /^[0-9a-f]{64}$/i.test(hash) ? hash.toLowerCase() : null;
+}
+
 /**
  * Runs the transaction without submitting; no approval popup. Throws unless the engine accepted
  * it. Uses the same fee cap as `submit`, so a dry run that passes means the real one can pay.
@@ -208,6 +215,15 @@ function rpc(p: TariProvider, method: string, params: unknown, ms = RPC_TIMEOUT_
       (e) => (clearTimeout(t), reject(e)),
     );
   });
+}
+
+/** Whether this browser has a transaction on `net` whose outcome it hasn't confirmed yet. */
+export function hasSavedRequest(net: NetConfig): boolean {
+  try {
+    return savedRequest(net) !== null;
+  } catch {
+    return false;
+  }
 }
 
 function savedRequest(net: NetConfig): string | null {
@@ -326,16 +342,20 @@ async function exclusive<T>(net: NetConfig, fn: () => Promise<T>): Promise<T> {
 
 /**
  * Opens the wallet's approval popup for `instructions` and submits once approved. Returns the
- * operation's result. Throws TxBlocked while an earlier transaction is unsettled.
+ * operation's result. Throws TxBlocked while an earlier transaction is unsettled. Sends nothing
+ * once `stillHere()` is false (the user left the page that asked); a request already sent is
+ * still followed to its outcome.
  */
 export async function submit(
   p: TariProvider,
   net: NetConfig,
   instructions: Instruction[],
   onStatus: (s: string) => void,
+  stillHere: () => boolean,
 ): Promise<unknown> {
   return exclusive(net, async () => {
     await settleSaved(p, net, onStatus);
+    if (!stillHere()) throw new Error("You left the page, so nothing was sent.");
     // Saving must work before anything can execute; a throw here stops the transaction.
     localStorage.setItem(pendingKey(net), "probe");
     localStorage.removeItem(pendingKey(net));

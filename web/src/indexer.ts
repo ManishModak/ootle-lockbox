@@ -78,20 +78,23 @@ export interface LockEvent {
   resource: string;
 }
 
+/** One event from a template, with the transaction that emitted it. */
+interface TemplateEvent {
+  tx: string;
+  payload: Record<string, unknown>;
+}
+
 /**
- * `Lockbox.LockCreated` events emitted by the pinned template, newest first. Any template can emit
- * an event with this topic, so events from other templates are dropped here. `complete` is false
- * when `maxPages` ran out before the oldest event or an event couldn't be decoded.
+ * Events with `topic` emitted by `template`, newest first. Any template can emit any topic, so
+ * events from other templates are dropped. `complete` is false when `maxPages` ran out before the
+ * oldest event or an event couldn't be decoded.
  */
-export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{ events: LockEvent[]; complete: boolean }> {
-  const template = net.lockboxTemplate;
-  if (!template) return { events: [], complete: true };
-  const out: LockEvent[] = [];
-  const seen = new Set<string>();
+async function templateEvents(net: NetConfig, template: string, topic: string, maxPages: number): Promise<{ events: TemplateEvent[]; complete: boolean }> {
+  const out: TemplateEvent[] = [];
   let decoded = true;
   let before: number | undefined;
   for (let page = 0; page < maxPages; page++) {
-    const q = new URLSearchParams({ topic: "Lockbox.LockCreated", limit: "100" });
+    const q = new URLSearchParams({ topic, limit: "100" });
     if (before !== undefined) q.set("before_id", String(before));
     const r = await getJson(`${net.indexer}/transactions/events?${q}`);
     for (const [tx, enc] of r.events ?? []) {
@@ -102,18 +105,40 @@ export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{
         decoded = false; // could be one of ours
         continue;
       }
-      if (String(e.template_address).toLowerCase() !== template || e.topic !== "Lockbox.LockCreated") continue;
-      const p = e.payload ?? {};
-      if (typeof p.lock !== "string" || seen.has(p.lock)) continue;
-      seen.add(p.lock);
-      out.push({
-        tx,
-        lock: p.lock,
-        resource: String(p.resource),
-      });
+      if (String(e.template_address).toLowerCase() !== template.toLowerCase() || e.topic !== topic) continue;
+      out.push({ tx: String(tx).toLowerCase(), payload: e.payload ?? {} });
     }
     if (typeof r.next_before_id !== "number" || (r.events ?? []).length < 100) return { events: out, complete: decoded };
     before = r.next_before_id;
   }
   return { events: out, complete: false };
+}
+
+/** `Lockbox.LockCreated` events from the pinned Lockbox template, newest first, one per lock. */
+export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{ events: LockEvent[]; complete: boolean }> {
+  if (!net.lockboxTemplate) return { events: [], complete: true };
+  const r = await templateEvents(net, net.lockboxTemplate, "Lockbox.LockCreated", maxPages);
+  const seen = new Set<string>();
+  const events: LockEvent[] = [];
+  for (const { tx, payload: p } of r.events) {
+    if (typeof p.lock !== "string" || seen.has(p.lock)) continue;
+    seen.add(p.lock);
+    events.push({ tx, lock: p.lock, resource: String(p.resource) });
+  }
+  return { events, complete: r.complete };
+}
+
+/**
+ * The address named by `field` in the `topic` event that `template` emitted in transaction `tx`,
+ * or null if the indexer doesn't show one within about 20 seconds. Only the pinned template can
+ * emit its own events, so this can't pick up an object some other transaction made.
+ */
+export async function addressFromTxEvent(net: NetConfig, template: string, topic: string, tx: string, field: string, prefix: string): Promise<string | null> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 2500));
+    const { events } = await templateEvents(net, template, topic, 1);
+    const v = events.find((e) => e.tx === tx.toLowerCase())?.payload[field];
+    if (typeof v === "string" && new RegExp(`^${prefix}_[0-9a-f]{64}$`).test(v)) return v;
+  }
+  return null;
 }

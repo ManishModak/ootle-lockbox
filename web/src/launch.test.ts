@@ -180,6 +180,33 @@ describe("missing data", () => {
     expect(facts(tampered((r) => delete r.resource.Resource.total_supply)).issued).toBe("unknown");
   });
 
+  it("is unknown when a nested or lock header field is absent", () => {
+    for (const change of [
+      (r: Raw) => delete r.resource.Resource.resource_type,
+      (r: Raw) => delete r.resource.Resource.divisibility,
+      (r: Raw) => delete r.resource.Resource.metadata.launched_by,
+      (r: Raw) => delete r.record.Component.header.access_rules.default,
+    ]) {
+      expect(facts(tampered(change)).issued).toBe("unknown");
+    }
+    expect(facts(tampered((r) => delete r.resource.Resource.access_rules.mint))).toMatchObject({ fixedSupply: "unknown", issued: "unknown" });
+    for (const k of ["owner_rule", "upgrade_rule", "template_address", "access_rules"]) {
+      expect(facts(tampered((r) => delete r.locks.get(LOCK1)!.lock.Component.header[k]))).toMatchObject({ issued: "yes", lockedAtLaunch: "unknown" });
+    }
+  });
+
+  it("still says no for a nested or lock header contradiction", () => {
+    expect(facts(tampered((r) => (r.resource.Resource.divisibility = 6))).issued).toBe("no");
+    expect(facts(tampered((r) => (r.resource.Resource.access_rules.mint = "AllowAll"))).fixedSupply).toBe("no");
+    expect(facts(tampered((r) => (r.record.Component.header.access_rules.default = "AllowAll"))).issued).toBe("no");
+    expect(facts(tampered((r) => (r.locks.get(LOCK1)!.lock.Component.header.owner_rule = { ByPublicKey: "00" }))).lockedAtLaunch).toBe("no");
+    const mixed = tampered((r) => {
+      delete r.locks.get(LOCK1)!.lock.Component.header.template_address;
+      r.locks.get(LOCK1)!.lock.Component.header.upgrade_rule = "Owner";
+    });
+    expect(facts(mixed).lockedAtLaunch).toBe("no");
+  });
+
   it("still says no when one field is missing and another contradicts", () => {
     const r = tampered((r) => {
       delete r.record.Component.header.owner_rule;

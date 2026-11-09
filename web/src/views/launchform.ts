@@ -4,13 +4,13 @@
  * token's launch proof page.
  */
 import type { NetConfig } from "../config";
-import { currentEpoch, getSubstate } from "../indexer";
+import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { isThisLaunch, LAUNCH_DECIMALS, launchProblem, MAX_LAUNCH_LOCKS, type LaunchInput, type LaunchLockInput } from "../newlaunch";
 import { MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, estimatedDate, formatDate, h, link, notice } from "../ui";
+import { errorText, estimatedDate, formatDate, h, link, notice, onThisPage } from "../ui";
 import { loadLaunch } from "../lockdata";
 import { formatAmount, parseAmount } from "../verify";
-import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, walletKey, walletNetwork } from "../wallet";
+import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, txHash, walletKey, walletNetwork } from "../wallet";
 import { setFormBusy, showTxError } from "./lock";
 
 const CLI_URL = "https://github.com/ManishModak/ootle-lockbox"; // TODO: the Launch Commitments repo once public
@@ -239,6 +239,7 @@ function reviewBox(
   sign.addEventListener("click", async () => {
     sign.setAttribute("disabled", "");
     setFormBusy(form, true);
+    const here = onThisPage();
     try {
       await settleEarlier(p, net, (t) => (status.textContent = t));
       // Time has passed since review: each reviewed epoch must still cover its chosen time.
@@ -250,10 +251,10 @@ function reviewBox(
       const ix = launchInstructions(net, account, input);
       status.textContent = "Checking with a dry run…";
       await dryRun(p, ix);
-      const result = await submit(p, net, ix, (t) => (status.textContent = t));
+      const result = await submit(p, net, ix, (t) => (status.textContent = t), here);
       status.textContent = "Launched. Finding your token…";
       const token = await findLaunchedToken(net, result, input, epoch);
-      if (token) location.hash = `#/${net.name}/launch/${token}`;
+      if (token && here()) location.hash = `#/${net.name}/launch/${token}`;
       else status.textContent = "Launched. Find the new token in your wallet, then open its page here to see the proof.";
     } catch (e) {
       showTxError(net, status, e);
@@ -266,20 +267,20 @@ function reviewBox(
 }
 
 /**
- * The wallet's result shape isn't documented and can carry any text (an image URL, say), so a
- * resource address in it is only a candidate: it counts only if its full launch proof passes and
- * its record is this launch (same terms, created no earlier than the reviewed epoch).
+ * The token this transaction launched, from the LaunchCreated event the pinned template emitted in
+ * it (addresses elsewhere in the result can come from the user's own text, such as the image URL).
+ * Its full proof must still pass and its record must match what was reviewed. Null when the result
+ * has no hash, the indexer doesn't show the event yet, or a check fails.
  */
 async function findLaunchedToken(net: NetConfig, result: unknown, input: LaunchInput, reviewedAt: number): Promise<string | null> {
-  const text = JSON.stringify(result, (_, v) => (typeof v === "bigint" ? v.toString() : v)) ?? "";
-  const candidates = [...new Set(text.match(/resource_[0-9a-f]{64}/g) ?? [])].filter((r) => r !== NATIVE_TARI).slice(0, 10);
-  for (const c of candidates) {
-    try {
-      const l = await loadLaunch(net, c, await currentEpoch(net));
-      if (l.proof?.issued === "yes" && l.proof.record && isThisLaunch(l.proof.record, l.token?.symbol ?? null, l.token?.name ?? null, input, reviewedAt)) return c;
-    } catch {
-      // not readable yet, or not a token
-    }
+  const tx = txHash(result);
+  if (!tx || !net.launchTemplate) return null;
+  try {
+    const token = await addressFromTxEvent(net, net.launchTemplate, "LaunchRecord.LaunchCreated", tx, "resource", "resource");
+    if (!token) return null;
+    const l = await loadLaunch(net, token, await currentEpoch(net));
+    return l.proof?.issued === "yes" && l.proof.record && isThisLaunch(l.proof.record, l.token?.symbol ?? null, l.token?.name ?? null, input, reviewedAt) ? token : null;
+  } catch {
+    return null; // the indexer failed; the token is in the wallet
   }
-  return null;
 }
