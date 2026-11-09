@@ -95,6 +95,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .form .row input { flex: 1; }
 .form .row { margin: 0; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 0; padding: 8px 12px 12px; }
+.lock-row { display: grid; gap: 8px; }
+.lock-row button { justify-self: start; }
 legend { font-weight: 600; padding: 0 4px; }
 .form button[type="submit"] { justify-self: start; margin-top: 12px; }
 

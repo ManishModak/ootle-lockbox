@@ -8,6 +8,7 @@ import { h } from "./ui";
 import { createView } from "./views/create";
 import { homeView } from "./views/home";
 import { launchView } from "./views/launch";
+import { launchFormView } from "./views/launchform";
 import { lockView } from "./views/lock";
 import { tokenView } from "./views/token";
 
@@ -63,6 +64,7 @@ async function render() {
   if (route.page === "lock" && valid("component")) await lockView(route.net, route.id.toLowerCase(), main);
   else if (route.page === "token" && valid("resource")) await tokenView(route.net, route.id.toLowerCase(), main);
   else if (route.page === "launch" && valid("resource")) await launchView(route.net, route.id.toLowerCase(), main);
+  else if (route.page === "launch" && route.id === "") await launchFormView(route.net, main);
   else if (route.page === "create") await createView(route.net, main);
   else await homeView(route.net, main);
 }

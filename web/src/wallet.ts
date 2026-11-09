@@ -13,9 +13,10 @@ import {
   stringLiteral,
   TransactionBuilder,
 } from "@tari-project/ootle";
-import type { Instruction } from "@tari-project/ootle";
+import type { Instruction, InstructionArg } from "@tari-project/ootle";
 import type { NetConfig } from "./config";
-import { isValidPublicKey, MAX_FEE, NETWORK_BYTE, parseBeneficiary } from "./newlock";
+import type { LaunchInput } from "./newlaunch";
+import { isValidPublicKey, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary } from "./newlock";
 
 interface TariProvider {
   isTariWallet?: boolean;
@@ -92,6 +93,40 @@ export function lockInstructions(
       publicKeyLiteral(beneficiaryHex),
       stringLiteral(memo),
     ])
+    .buildUnsignedTransaction().instructions as Instruction[];
+}
+
+/**
+ * The template's `locks: Vec<(Amount, u64, RistrettoPublicKeyBytes)>` argument: a CBOR array of
+ * 3-item arrays, built from the SDK's encodings of each item.
+ */
+export function locksLiteral(locks: LaunchInput["locks"]): InstructionArg {
+  if (locks.length > 23) throw new Error("Too many locks."); // one-byte CBOR array header
+  const hex = (a: InstructionArg) => (a as { Literal: string }).Literal;
+  const items = locks.map((l) => "83" + hex(amountLiteral(l.amount)) + hex(intLiteral(l.unlockEpoch)) + hex(publicKeyLiteral(l.beneficiary)));
+  return { Literal: (0x80 + locks.length).toString(16) + items.join("") };
+}
+
+/**
+ * account.withdraw(fee in TARI) -> LaunchRecord::launch(...) -> account.deposit(remainder), all in
+ * the main instructions, so any failure undoes the whole launch, fee included.
+ */
+export function launchInstructions(net: NetConfig, account: string, input: LaunchInput): Instruction[] {
+  if (!net.launchTemplate || net.launchFee === null) throw new Error(`Launch Commitments is not published on ${net.label} yet.`);
+  if (!input.locks.every((l) => isValidPublicKey(l.beneficiary))) throw new Error("A beneficiary key is not a valid public key.");
+  return TransactionBuilder.new(net.network, 0)
+    .callMethod({ componentAddress: account, methodName: "withdraw" }, [resourceAddressLiteral(NATIVE_TARI), amountLiteral(net.launchFee)])
+    .saveVar("fee")
+    .callFunction({ templateAddress: `template_${net.launchTemplate}`, functionName: "launch" }, [
+      { Workspace: "fee" },
+      stringLiteral(input.symbol),
+      stringLiteral(input.name),
+      stringLiteral(input.imageUrl),
+      amountLiteral(input.supply),
+      locksLiteral(input.locks),
+    ])
+    .saveVar("rest")
+    .callMethod({ componentAddress: account, methodName: "deposit" }, [{ Workspace: "rest" }])
     .buildUnsignedTransaction().instructions as Instruction[];
 }
 
