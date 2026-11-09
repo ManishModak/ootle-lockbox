@@ -1,0 +1,85 @@
+{
+ "Component": {
+  "header": {
+   "template_address": "ec0b8e8bf1ad8e05e0745e66868929070358da5dd975d72cd1031befa5141a8a",
+   "owner_rule": "None",
+   "access_rules": {
+    "method_access": {
+     "info": "AllowAll"
+    },
+    "default": "DenyAll"
+   },
+   "entity_id": "c6",
+   "upgrade_rule": "Locked"
+  },
+  "body": {
+   "state": [
+    {
+     "@cbor": "tag",
+     "tag": 131,
+     "value": {
+      "@cbor": "bytes",
+      "hex": "c69eb717bbda751f9268c493d50c4bc17a0d34a50dd37673215597f79a513cee"
+     }
+    },
+    {
+     "@cbor": "tag",
+     "tag": 2,
+     "value": {
+      "@cbor": "bytes",
+      "hex": "d3c21bcecceda1000000"
+     }
+    },
+    [
+     [
+      {
+       "@cbor": "tag",
+       "tag": 128,
+       "value": {
+        "@cbor": "bytes",
+        "hex": "fd916fadc33bfa0b19c205ed60ca70287ac1cdcc3a1bef4313e12a66a05ede63"
+       }
+      },
+      {
+       "@cbor": "tag",
+       "tag": 2,
+       "value": {
+        "@cbor": "bytes",
+        "hex": "2a5a058fc295ed000000"
+       }
+      },
+      12969,
+      {
+       "@cbor": "bytes",
+       "hex": "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017"
+      }
+     ],
+     [
+      {
+       "@cbor": "tag",
+       "tag": 128,
+       "value": {
+        "@cbor": "bytes",
+        "hex": "5395c3841c6af089b61e25c07b1d97228c806ba67b8ce1cbc0908f7e9ece1e08"
+       }
+      },
+      {
+       "@cbor": "tag",
+       "tag": 2,
+       "value": {
+        "@cbor": "bytes",
+        "hex": "0a968163f0a57b400000"
+       }
+      },
+      12973,
+      {
+       "@cbor": "bytes",
+       "hex": "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017"
+      }
+     ]
+    ],
+    12967
+   ]
+  }
+ }
+}

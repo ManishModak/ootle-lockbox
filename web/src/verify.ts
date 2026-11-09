@@ -74,13 +74,13 @@ export function toBigInt(x: Json): bigint | null {
 
 const U64_MAX = 2n ** 64n - 1n;
 
-function toEpoch(x: Json): bigint | null {
+export function toEpoch(x: Json): bigint | null {
   const b = toBigInt(x);
   return b !== null && b >= 0n && b <= U64_MAX ? b : null;
 }
 
 /** `{"@cbor":"bytes","hex":...}`, optionally wrapped in a CBOR tag, to a hex string. */
-function cborHex(x: Json): string | null {
+export function cborHex(x: Json): string | null {
   if (!isObj(x)) return null;
   if (x["@cbor"] === "tag") return cborHex(x.value);
   if (x["@cbor"] === "bytes" && typeof x.hex === "string") return x.hex.toLowerCase();

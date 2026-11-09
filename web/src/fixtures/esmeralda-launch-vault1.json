@@ -1,0 +1,12 @@
+{
+ "Vault": {
+  "resource_container": {
+   "Fungible": {
+    "address": "resource_c69eb717bbda751f9268c493d50c4bc17a0d34a50dd37673215597f79a513cee",
+    "amount": "200000000000000000000000",
+    "locked_amount": "0"
+   }
+  },
+  "freeze_flags": 0
+ }
+}

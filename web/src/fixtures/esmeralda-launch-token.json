@@ -1,0 +1,35 @@
+{
+ "Resource": {
+  "resource_type": "Fungible",
+  "owner_rule": "None",
+  "access_rules": {
+   "mint": "DenyAll",
+   "mint_updater": "Locked",
+   "burn": "DenyAll",
+   "burn_updater": "Locked",
+   "recall": "DenyAll",
+   "recall_updater": "Locked",
+   "withdraw": "AllowAll",
+   "withdraw_updater": "Locked",
+   "deposit": "AllowAll",
+   "deposit_updater": "Locked",
+   "update_nft_data": "DenyAll",
+   "nft_data_updater": "Locked",
+   "freeze": "DenyAll",
+   "freeze_updater": "Locked",
+   "update_metadata": "DenyAll",
+   "metadata_updater": "Locked",
+   "auth_hook_updater": "Locked"
+  },
+  "metadata": {
+   "IMAGE_URL": "https://manishmodak.github.io/ootle-lockbox/favicon.svg",
+   "SYMBOL": "LCDEMO",
+   "launched_by": "component_c6c56ae085f622a8b083419c48bfa82e3c3746cb18e941a0548000bbf6eab880",
+   "name": "Launch Commitments Demo"
+  },
+  "total_supply": "1000000000000000000000000",
+  "view_key": null,
+  "auth_hook": null,
+  "divisibility": 18
+ }
+}
