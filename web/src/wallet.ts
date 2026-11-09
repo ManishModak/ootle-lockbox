@@ -241,8 +241,8 @@ function clearSaved(net: NetConfig, requestId: string) {
  * look first; pressing again then continues. Flows call it before their own checks and dry run,
  * so a spent balance or a failing dry run can never hide an earlier transaction.
  */
-export async function settleEarlier(p: TariProvider, net: NetConfig, onStatus: (s: string) => void): Promise<void> {
-  await exclusive(net, () => settleSaved(p, net, onStatus));
+export async function settleEarlier(p: TariProvider, net: NetConfig, onStatus: (s: string) => void): Promise<Settled> {
+  return exclusive(net, () => settleSaved(p, net, onStatus));
 }
 
 /**
@@ -311,18 +311,22 @@ function rejectionText(result: unknown): string | null {
   return v !== null && v !== "accepted" ? v.rejected : null;
 }
 
+/** How settling ended without a throw: nothing was saved, or the saved request never ran. */
+export type Settled = "nothing-saved" | "not-run";
+
 /**
  * Settles the request saved by an earlier attempt. Returns normally only when nothing from it can
  * still execute and nothing executed; otherwise throws, so the user sees the outcome first.
+ * "nothing-saved" says nothing about a request another tab already settled.
  */
-async function settleSaved(p: TariProvider, net: NetConfig, onStatus: (s: string) => void) {
+async function settleSaved(p: TariProvider, net: NetConfig, onStatus: (s: string) => void): Promise<Settled> {
   const id = savedRequest(net);
-  if (!id) return;
+  if (!id) return "nothing-saved";
   onStatus("Checking an earlier transaction from this browser...");
   const out = await follow(p, id, onStatus);
   if (out.status === "unknown") throw new TxBlocked(`An earlier Lockbox transaction failed in your wallet (${out.error}). ${UNKNOWN}`, id);
   clearSaved(net, id);
-  if (out.status === "not-run") return; // never executed: safe to go on
+  if (out.status === "not-run") return "not-run"; // never executed: safe to go on
   const rejected = rejectionText(out.result);
   throw new TxBlocked(
     rejected

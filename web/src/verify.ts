@@ -109,26 +109,28 @@ export function readLock(value: Json, lockboxTemplate: string): LockReading {
   if (!comp || !header) {
     return { checks: [{ ok: false, label: "This address is not a component" }], genuine: false, provenance: "no", state: null };
   }
-  // Each check notes whether the data it reads is present; a failure on missing data isn't a contradiction.
-  const results: { check: Check; present: boolean }[] = [];
-  const add = (present: boolean, ok: boolean, label: string, detail: string) => results.push({ check: { ok, label, detail: ok ? undefined : detail }, present });
-  const has = (k: string) => header[k] !== undefined;
+  // Each check is three-way: null means the data it reads is missing, which isn't a contradiction.
+  const results: Tri[] = [];
+  const checks: Check[] = [];
+  const add = (ok: Tri, label: string, detail?: string) => {
+    results.push(ok);
+    checks.push({ ok: ok === true, label, detail: ok === true ? undefined : ok === null ? "could not be read" : detail });
+  };
+  const when = (k: string, cond: (v: Json) => boolean): Tri => (header[k] === undefined ? null : cond(header[k]));
 
   const template = String(header.template_address ?? "").toLowerCase();
-  add(has("template_address"), template === lockboxTemplate.toLowerCase(), "Runs the Lockbox template", `template ${template || "unknown"}`);
-  add(has("owner_rule"), header.owner_rule === "None", "Has no owner", "an owner could bypass its rules");
-  add(has("upgrade_rule"), header.upgrade_rule === "Locked", "Can never be upgraded", "an upgradable component can fake being a Lockbox");
+  add(when("template_address", () => template === lockboxTemplate.toLowerCase()), "Runs the Lockbox template", `template ${template}`);
+  add(when("owner_rule", (o) => o === "None"), "Has no owner", "an owner could bypass its rules");
+  add(when("upgrade_rule", (u) => u === "Locked"), "Can never be upgraded", "an upgradable component can fake being a Lockbox");
 
   const state = parseState(comp.body);
-  results.push({ check: { ok: state !== null, label: "Lock data is readable" }, present: comp.body !== undefined });
+  add(comp.body === undefined ? null : state !== null, "Lock data is readable");
   if (state) {
-    add(true, isValidPublicKey(state.beneficiary), "The beneficiary key is a real public key", "nobody can ever sign for it, so the tokens can't be claimed");
-    add(has("access_rules"), claimRuleBindsTo(header.access_rules, state.beneficiary), "Only the beneficiary can claim", "the claim rule does not match the stored beneficiary");
+    add(isValidPublicKey(state.beneficiary), "The beneficiary key is a real public key", "nobody can ever sign for it, so the tokens can't be claimed");
+    add(claimRuleBindsTo(header.access_rules, state.beneficiary), "Only the beneficiary can claim", "the claim rule does not match the stored beneficiary");
   }
-  const checks = results.map((r) => r.check);
-  const genuine = checks.every((c) => c.ok);
-  const contradicted = results.some((r) => !r.check.ok && r.present);
-  return { checks, genuine, provenance: genuine ? "yes" : contradicted ? "no" : "unknown", state };
+  const genuine = results.every((r) => r === true);
+  return { checks, genuine, provenance: genuine ? "yes" : results.includes(false) ? "no" : "unknown", state };
 }
 
 function parseState(body: Json): LockState | null {
@@ -152,19 +154,46 @@ function parseState(body: Json): LockState | null {
   };
 }
 
-/** `claim` must require exactly the beneficiary's public-key badge; `default` must deny. Anything else fails. */
-function claimRuleBindsTo(rules: Json, beneficiary: string): boolean {
-  if (!isObj(rules) || rules.default !== "DenyAll" || !isObj(rules.method_access)) return false;
-  const methods = rules.method_access;
-  const extra = Object.keys(methods).filter((m) => m !== "claim" && m !== "info");
-  if (extra.length > 0) return false;
-  const r = methods.claim;
-  const nf =
-    isObj(r) && isObj(r.Restricted) && isObj(r.Restricted.Require) && isObj(r.Restricted.Require.Require)
-      ? r.Restricted.Require.Require.NonFungibleAddress
-      : null;
-  if (!isObj(nf) || nf.resource_address !== PUBLIC_KEY_BADGE_RESOURCE || !isObj(nf.id)) return false;
-  return typeof nf.id.U256 === "string" && nf.id.U256.toLowerCase() === beneficiary;
+/** A check's outcome: passed, failed, or null when the data it reads is missing. */
+type Tri = boolean | null;
+
+const CONTRADICTION = Symbol("contradiction");
+
+/**
+ * Follows `path` into `x`. Returns the value, undefined when a field on the way is absent (missing
+ * data), or CONTRADICTION when a step isn't an object. A step written `=Name` is an enum variant:
+ * an object holding a different variant is a contradiction, not missing data.
+ */
+function dig(x: Json, path: string[]): Json | typeof CONTRADICTION {
+  for (const step of path) {
+    if (x === undefined) return undefined;
+    if (!isObj(x)) return CONTRADICTION;
+    const key = step.replace(/^=/, "");
+    if (step.startsWith("=") && !(key in x) && Object.keys(x).length > 0) return CONTRADICTION;
+    x = x[key];
+  }
+  return x;
+}
+
+/** `cond(dig(x, path))`, three-way. */
+function at(x: Json, path: string[], cond: (v: Json) => boolean): Tri {
+  const v = dig(x, path);
+  return v === undefined ? null : v === CONTRADICTION ? false : cond(v);
+}
+
+/**
+ * `claim` must require exactly the beneficiary's public-key badge, `default` must deny, and no
+ * other method may be open. Any explicit difference is false; a missing field is null.
+ */
+function claimRuleBindsTo(rules: Json, beneficiary: string): Tri {
+  const nf = ["method_access", "claim", "=Restricted", "=Require", "=Require", "=NonFungibleAddress"];
+  const parts = [
+    at(rules, ["default"], (d) => d === "DenyAll"),
+    at(rules, ["method_access"], (m) => isObj(m) && Object.keys(m).every((k) => k === "claim" || k === "info")),
+    at(rules, [...nf, "resource_address"], (a) => a === PUBLIC_KEY_BADGE_RESOURCE),
+    at(rules, [...nf, "id", "=U256"], (u) => typeof u === "string" && u.toLowerCase() === beneficiary),
+  ];
+  return parts.includes(false) ? false : parts.includes(null) ? null : true;
 }
 
 /**

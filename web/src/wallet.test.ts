@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./config";
-import { dryRun, engineVerdict, forgetEarlierTransaction, submit, TxBlocked, txHash } from "./wallet";
+import { dryRun, engineVerdict, forgetEarlierTransaction, settleEarlier, submit, TxBlocked, txHash } from "./wallet";
 
 const net = NETWORKS.esmeralda;
 const accept = { finalize: { result: { Accept: {} } } };
@@ -195,6 +195,14 @@ describe("submit", () => {
     expect(store.has(KEY)).toBe(false);
     expect(await run(w)).toEqual({ ok: accept }); // a separate, deliberate attempt
     expect(w.creates()).toBe(1);
+  });
+
+  it("tells 'never ran' apart from 'nothing saved' when settling", async () => {
+    const w = fakeWallet({ status: () => ({ status: "rejected" }) });
+    expect(await settle(settleEarlier(w.p, net, () => {}))).toEqual({ ok: "nothing-saved" });
+    store.set(KEY, "old");
+    expect(await settle(settleEarlier(w.p, net, () => {}))).toEqual({ ok: "not-run" });
+    expect(store.has(KEY)).toBe(false);
   });
 
   it("submits a saved request that was approved before a reload, and stops there", async () => {

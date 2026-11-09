@@ -20,8 +20,11 @@ export function pendingBanner(net: NetConfig): HTMLElement | null {
       const wn = await walletNetwork(p);
       if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}. Switch it to ${net.label}.`);
       await connect(p);
-      await settleEarlier(p, net, (t) => (status.textContent = t));
-      status.textContent = "It never ran. You can carry on.";
+      const settled = await settleEarlier(p, net, (t) => (status.textContent = t));
+      status.textContent =
+        settled === "not-run"
+          ? "It never ran. You can carry on."
+          : "Another tab has already dealt with it. Check your wallet history before repeating anything.";
     } catch (e) {
       showTxError(net, status, e);
     }

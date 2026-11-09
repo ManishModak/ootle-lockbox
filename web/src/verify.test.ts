@@ -201,3 +201,41 @@ describe("amounts", () => {
     expect(lockedShare(5n, null)).toBeNull();
   });
 });
+
+describe("readLock provenance", () => {
+  const rules = (l: any) => l.Component.header.access_rules;
+  const claimNf = (l: any) => rules(l).method_access.claim.Restricted.Require.Require.NonFungibleAddress;
+  const changed = (change: (l: any) => void) => {
+    const l = clone(lockFixture);
+    change(l);
+    return readLock(l, TEMPLATE);
+  };
+
+  it("is unknown, never genuine, when a claim-rule field is missing", () => {
+    for (const change of [
+      (l: any) => delete rules(l).default,
+      (l: any) => delete rules(l).method_access,
+      (l: any) => delete claimNf(l).resource_address,
+      (l: any) => delete claimNf(l).id,
+      (l: any) => delete l.Component.header.owner_rule,
+    ]) {
+      const r = changed(change);
+      expect(r.genuine).toBe(false);
+      expect(r.provenance).toBe("unknown");
+    }
+  });
+
+  it("is a contradiction when a claim-rule field differs or holds another variant", () => {
+    for (const change of [
+      (l: any) => (rules(l).default = "AllowAll"),
+      (l: any) => (rules(l).method_access.withdraw = "AllowAll"),
+      (l: any) => (rules(l).method_access.claim = "AllowAll"),
+      (l: any) => (rules(l).method_access.claim.Restricted.Require.Require = { ResourceAddress: "resource_00" }),
+      (l: any) => (claimNf(l).id = { String: "x" }),
+      (l: any) => (claimNf(l).resource_address = "resource_" + "02".repeat(32)),
+    ]) {
+      expect(changed(change).provenance).toBe("no");
+    }
+    expect(readLock(lockFixture, TEMPLATE).provenance).toBe("yes");
+  });
+});
