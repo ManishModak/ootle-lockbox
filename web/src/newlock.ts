@@ -13,7 +13,7 @@ export const NATIVE_TARI = "resource_0101010101010101010101010101010101010101010
 export const MAX_FEE = 50_000n;
 
 /**
- * The first epoch at which a lock may open no earlier than `targetMs`. The current epoch may end
+ * The first epoch that starts after `targetMs` if every epoch lasts at least `min` minutes. The current epoch may end
  * at any moment, so only epochs after the next boundary count, each at the network's shortest
  * length. Null if the target isn't in the future.
  */

@@ -5,7 +5,7 @@
 import { MAX_MEMO_BYTES, REPO_URL, type NetConfig } from "../config";
 import { currentEpoch, getSubstate } from "../indexer";
 import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, epochsAsDuration, estimatedDate, h, link, notice } from "../ui";
+import { errorText, epochsAsDuration, estimatedDate, formatDate, h, link, notice } from "../ui";
 import { formatAmount, parseAmount, readLock, readResource } from "../verify";
 import { balances, connect, dryRun, getProvider, lockInstructions, submit, walletKey, walletNetwork, type Balance } from "../wallet";
 import { checkList, showTxError } from "./lock";
@@ -81,7 +81,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
     whenOut.textContent =
       e === null
         ? "Pick a time in the future."
-        : `Estimated to open around ${estimatedDate(net, e, epoch)} (${epochsAsDuration(net, e - epoch)} from now). The unlock epoch is set so it can't open before your time unless epochs get shorter than ${net.epochMinutes.min} minutes.`;
+        : `Most likely opens around ${estimatedDate(net, e, epoch)} (${epochsAsDuration(net, e - epoch)} from now). Epochs take about ${net.epochMinutes.typical} minutes; it opens after ${formatDate(target())} as long as they stay at least ${net.epochMinutes.min} minutes. Faster blocks would open it earlier.`;
   });
 
   const beneficiary = (): string | null => (meRadio.checked ? myKey : parseBeneficiary(other.value, NETWORK_BYTE[net.name]));
@@ -172,7 +172,7 @@ async function reviewBox(
       h("dt", {}, "Lock"),
       h("dd", { class: "big" }, `${formatAmount(amount, b.divisibility)} ${sym}`),
       h("dt", {}, "Until"),
-      h("dd", {}, `epoch ${unlockEpoch} (around ${estimatedDate(net, unlockEpoch, epoch)})`),
+      h("dd", {}, `epoch ${unlockEpoch}, most likely around ${estimatedDate(net, unlockEpoch, epoch)}; after ${formatDate(target)} unless epochs run shorter than ${net.epochMinutes.min} minutes`),
       h("dt", {}, "Network fee"),
       h("dd", {}, `up to ${formatAmount(MAX_FEE, 6)} TARI`),
       h("dt", {}, "Beneficiary"),

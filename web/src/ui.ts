@@ -64,9 +64,14 @@ export function epochsAsDuration(net: NetConfig, epochs: number): string {
   return `about ${(days / 365.25).toFixed(1)} years`;
 }
 
-export function estimatedDate(net: NetConfig, epoch: number, currentEpoch: number): string {
-  const ms = Date.now() + (epoch - currentEpoch) * net.epochMinutes.typical * 60_000;
+/** A date and time in the viewer's locale, e.g. "9 Nov 2026, 14:05". */
+export function formatDate(ms: number): string {
   return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** When `epoch` most likely starts, at the network's typical epoch length. */
+export function estimatedDate(net: NetConfig, epoch: number, currentEpoch: number): string {
+  return formatDate(Date.now() + (epoch - currentEpoch) * net.epochMinutes.typical * 60_000);
 }
 
 export function pill(text: string, kind: "ok" | "warn" | "bad" | "neutral"): HTMLElement {

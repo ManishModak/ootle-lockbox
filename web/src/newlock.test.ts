@@ -48,7 +48,7 @@ describe("unlockEpochFor", () => {
     expect(unlockEpochFor(net, 100, now + 1 * min, now)).toBe(102);
   });
 
-  it("never opens before the chosen time, even if the current epoch ends now", () => {
+  it("opens after the chosen time while epochs last at least min, even if the current epoch ends now", () => {
     for (const minutes of [1, 31, 32, 33, 500, 525_600]) {
       const e = unlockEpochFor(net, 100, now + minutes * min, now)!;
       // Worst case: epoch 101 starts immediately, and each later epoch is the shortest possible.

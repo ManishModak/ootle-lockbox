@@ -83,7 +83,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
       h(
         "p",
         { class: "muted small" },
-        "Epochs, not dates, decide when a lock opens. Epoch length varies, so dates shown here are estimates; a new lock is set so it can't open before the time you pick. Locks hold public token balances; private TARI must be made public in your wallet first. ",
+        "Epochs, not dates, decide when a lock opens. Epoch length varies, so dates shown here are estimates; a new lock is set to open after the time you pick, assuming epochs don't run much faster than usual. Epochs count base-layer blocks, so if Tari ever changes how many blocks make an epoch, locks would open at a different time. Locks hold public token balances; private TARI must be made public in your wallet first. ",
         h("a", { href: REPO_URL }, "Source code (MIT)"),
         ".",
       ),

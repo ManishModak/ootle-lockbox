@@ -17,8 +17,9 @@ export interface NetConfig {
   /** The value Sapient's `tari_getNetwork` reports for this network. */
   walletNetwork: string;
   /**
-   * Epoch length in minutes. `min` is the shortest an epoch can be: new locks convert a chosen
-   * time at this rate so they never open early. `typical` only drives the dates shown.
+   * Epoch length in minutes. `min` is an assumed floor, not a guarantee (blocks can come faster):
+   * new locks convert a chosen time at this rate, so they open on time unless epochs run shorter.
+   * `typical` only drives the dates shown.
    */
   epochMinutes: { min: number; typical: number };
 }
@@ -31,7 +32,7 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     indexer: "https://esme-indexer-a.ootle.tari.com",
     lockboxTemplate: "d7f5ee289465580308d3074a0892d90eefb4bf157200171692bdf47cc9473832",
     walletNetwork: "esmeralda",
-    epochMinutes: { min: 32, typical: 40 }, // measured 32-48 minutes, Nov 2026
+    epochMinutes: { min: 32, typical: 60 }, // measured 32-48 minutes on 7 Nov 2026, ~83 on average 7-9 Nov
   },
   mainnet: {
     name: "mainnet",
@@ -40,9 +41,10 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     indexer: "https://indexer-a.ootle.tari.com",
     lockboxTemplate: null,
     walletNetwork: "mainnet",
-    // Mainnet epochs are 60 L1 blocks (~120 minutes) and drop to 10 blocks (~20 minutes) at the
-    // shorter-epoch fork (consensus_constants.rs). Re-measure after launch.
-    epochMinutes: { min: 20, typical: 120 },
+    // An epoch is 10 L1 blocks on mainnet since height 126,000 (Minotari v6 consensus_constants.rs),
+    // at a 2-minute block target: ~20 minutes. `min` leaves 10% for blocks running fast.
+    // Re-measure after launch.
+    epochMinutes: { min: 18, typical: 20 },
   },
 };
 

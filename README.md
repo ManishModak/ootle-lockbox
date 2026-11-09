@@ -18,6 +18,12 @@ component runs the Lockbox template address **and** has no owner and a `Locked` 
 an event with the same name, and a component whose upgrade rule allows it can be switched into the Lockbox template
 with fake state. Lockbox components are always created ownerless and non-upgradable, so genuine locks pass.
 
+**Epochs, not dates.** Ootle templates can't read the clock, so a lock opens at an epoch. An epoch is a fixed
+number of base-layer blocks (10 on mainnet, about 20 minutes), so dates are estimates. The web app turns a chosen
+time into an epoch assuming epochs last at least 18 minutes, so a lock usually opens a little after that time. This
+is an assumption, not a guarantee: if blocks come faster for long enough, the lock opens earlier. Ootle derives the epoch as `block height / epoch length`; if Tari ever changes the epoch length, epoch numbers
+jump and locks would open at a different time.
+
 Accepts public fungible tokens, NFTs and the LP tokens of Ootle's built-in liquidity pools. Buckets holding blinded
 confidential commitments are refused, since a claim could not move them.
 
