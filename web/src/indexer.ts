@@ -130,11 +130,12 @@ export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{
 
 /**
  * The address named by `field` in the `topic` event that `template` emitted in transaction `tx`,
- * or null if the indexer doesn't show one within about 20 seconds. Only the pinned template can
- * emit its own events, so this can't pick up an object some other transaction made.
+ * or null if the indexer doesn't show one within about a minute (on Esmeralda it lagged the chain
+ * by 20-40 seconds). Only the pinned template can emit its own events, so this can't pick up an
+ * object some other transaction made.
  */
 export async function addressFromTxEvent(net: NetConfig, template: string, topic: string, tx: string, field: string, prefix: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2500));
     const { events } = await templateEvents(net, template, topic, 1);
     const v = events.find((e) => e.tx === tx.toLowerCase())?.payload[field];

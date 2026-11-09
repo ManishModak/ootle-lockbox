@@ -47,7 +47,7 @@ export async function createView(net: NetConfig, root: HTMLElement) {
       if (owner !== myKey) throw new Error("Your wallet's key doesn't match its account's owner on the indexer, so this page can't confirm who you are. Lock with lockbox-cli instead.");
       intro.replaceWith(form(net, p, account, myKey, list, epoch));
     } catch (e) {
-      status.textContent = errorText(e);
+      showTxError(net, status, e);
       btn.removeAttribute("disabled");
     }
   });

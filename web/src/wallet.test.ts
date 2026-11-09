@@ -3,7 +3,15 @@ import { NETWORKS } from "./config";
 import { dryRun, engineVerdict, forgetEarlierTransaction, settleEarlier, submit, TxBlocked, txHash } from "./wallet";
 
 const net = NETWORKS.esmeralda;
-const accept = { finalize: { result: { Accept: {} } } };
+const HASH = "c9".repeat(32);
+/** A submitted receipt as Sapient returns it (shape taken from a real Esmeralda receipt). */
+const receipt = (outcome: unknown, decision: unknown = "Commit", hash = HASH) => ({
+  transaction_id: HASH,
+  result: { Finalized: { final_decision: decision, abort_details: null, execution_result: { finalize: { result: outcome, transaction_hash: hash } } } },
+});
+/** A dry run's result as Sapient returns it. */
+const dryResult = (outcome: unknown) => ({ transaction_id: HASH, result: { finalize: { result: outcome, transaction_hash: HASH } } });
+const accept = receipt({ Accept: {} });
 
 /**
  * A scripted wallet. `status(id)` answers tari_getTransactionRequest (throw = transport failure);
@@ -68,29 +76,37 @@ afterEach(() => {
 });
 
 describe("engineVerdict / dryRun", () => {
-  it("reads accept, both rejection shapes, and unknown shapes", () => {
+  it("reads receipts and dry runs: accept, every rejection, and unknown shapes", () => {
     expect(engineVerdict(accept)).toBe("accepted");
-    expect(engineVerdict({ result: accept })).toBe("accepted");
-    expect(engineVerdict({ finalize: { result: { Reject: "early" } } })).toEqual({ rejected: "early" });
-    expect(engineVerdict({ finalize: { result: { AcceptFeeRejectRest: [{}, { x: 1 }] } } })).toEqual({ rejected: '{"x":1}' });
+    expect(engineVerdict(dryResult({ Accept: {} }))).toBe("accepted");
+    expect(engineVerdict(receipt({ Reject: "early" }))).toEqual({ rejected: "early" });
+    expect(engineVerdict(dryResult({ Reject: "early" }))).toEqual({ rejected: "early" });
+    expect(engineVerdict(receipt({ AcceptFeeRejectRest: [{}, { x: 1 }] }))).toEqual({ rejected: '{"x":1}' });
+    expect(engineVerdict(receipt({ Accept: {} }, { Abort: "conflict" }))).toEqual({ rejected: 'not committed: {"Abort":"conflict"}' });
+    expect(engineVerdict({ transaction_id: HASH, result: { Rejected: { reason: "bad" } } })).toEqual({ rejected: '{"reason":"bad"}' });
+    expect(engineVerdict({ transaction_id: HASH, result: "Pending" })).toBeNull();
+    const undecided = receipt({ Accept: {} });
+    delete (undecided.result.Finalized as { final_decision?: unknown }).final_decision;
+    expect(engineVerdict(undecided)).toBeNull();
+    expect(engineVerdict({ finalize: { result: { Accept: {} } } })).toBeNull(); // not a shape Sapient returns
     expect(engineVerdict({ ok: true })).toBeNull();
   });
 
   it("throws unless the engine accepted", async () => {
     const dry = (result: unknown) => dryRun(fakeWallet({ status: () => null, dry: result }).p, []);
-    await expect(dry({ result: { finalize: { result: { Reject: "no" } } } })).rejects.toThrow("reject");
+    await expect(dry(dryResult({ Reject: "no" }))).rejects.toThrow("reject");
     await expect(dry({})).rejects.toThrow("recognise");
-    await expect(dry(accept)).resolves.toBeUndefined();
+    await expect(dry(dryResult({ Accept: {} }))).resolves.toBeUndefined();
   });
 });
 
 describe("txHash", () => {
-  it("reads only the finalize result's own transaction hash", () => {
+  it("reads only the receipt's own finalize transaction hash", () => {
     const hash = "61".repeat(32);
-    expect(txHash({ finalize: { transaction_hash: hash.toUpperCase() } })).toBe(hash);
-    expect(txHash({ result: { finalize: { transaction_hash: hash } } })).toBe(hash);
-    expect(txHash({ finalize: { transaction_hash: "not-a-hash" } })).toBeNull();
-    expect(txHash({ transaction_hash: hash })).toBeNull();
+    expect(txHash(receipt({ Accept: {} }, "Commit", hash.toUpperCase()))).toBe(hash);
+    expect(txHash(receipt({ Accept: {} }, "Commit", "not-a-hash"))).toBeNull();
+    expect(txHash(dryResult({ Accept: {} }))).toBeNull(); // a dry run sent nothing
+    expect(txHash({ transaction_id: hash })).toBeNull();
   });
 });
 
@@ -226,8 +242,26 @@ describe("submit", () => {
   });
 
   it("reports an on-chain rejection instead of success", async () => {
-    const w = fakeWallet({ status: () => ({ status: "submitted", result: { finalize: { result: { Reject: "too early" } } } }) });
+    const w = fakeWallet({ status: () => ({ status: "submitted", result: receipt({ Reject: "too early" }) }) });
     expect(errOf(await run(w))?.message).toContain("too early");
     expect(store.has(KEY)).toBe(false);
+  });
+
+  it("keeps an outcome it can't read saved and blocks repeats until the user forgets it", async () => {
+    const pending = { transaction_id: HASH, result: "Pending" };
+    const w = fakeWallet({ status: (id) => ({ status: "submitted", result: id === "req1" ? pending : accept }) });
+    const first = errOf(await run(w));
+    expect(first).toBeInstanceOf(TxBlocked);
+    expect(first?.message).toMatch(/didn't say how it ended.*wallet's history/);
+    expect((first as TxBlocked).forgettable).toBe("req1");
+    expect(store.get(KEY)).toBe("req1");
+    // Settling it again still can't tell, so it stays blocked without creating anything new.
+    const again = errOf(await run(w));
+    expect((again as TxBlocked).forgettable).toBe("req1");
+    expect(store.get(KEY)).toBe("req1");
+    expect(w.creates()).toBe(1);
+    await forgetEarlierTransaction(net, "req1");
+    expect(await run(w)).toEqual({ ok: accept });
+    expect(w.creates()).toBe(2);
   });
 });

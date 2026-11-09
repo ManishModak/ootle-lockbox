@@ -46,6 +46,11 @@ bumps the template library.
 (`#/<network>/token/<resource>`), and lock creation and claiming. The verification rules live in `web/src/verify.ts`
 and are tested against real Esmeralda data.
 
+It also hosts **Launch Commitments** (Esmeralda testnet only for now): `#/<network>/launch` launches a fixed-supply
+token whose rules nobody can change and locks the chosen allocations in Lockbox in the same transaction, for a flat
+fee; `#/<network>/launch/<resource>` proves those facts for any token launched that way. The template lives in its
+own repository; the page's checks are in `web/src/launch.ts`.
+
 ```bash
 cd web
 pnpm install
@@ -67,6 +72,11 @@ Every push to `main` deploys the site to GitHub Pages (`.github/workflows/pages.
 |---|---|
 | Esmeralda testnet | `template_3f77a82e2eecb1795bc250ce919706519ea8feacc283d25f9e9740edc81b12b3` (9 Nov; replaced `template_d7f5ee28…` from 7 Nov, which lacked the beneficiary-key check) |
 | Mainnet | published on 11 Nov 2026 (address added here) |
+
+| Network | Launch Commitments template |
+|---|---|
+| Esmeralda testnet | `template_ec0b8e8bf1ad8e05e0745e66868929070358da5dd975d72cd1031befa5141a8a` |
+| Mainnet | not published yet |
 
 ## Licence
 

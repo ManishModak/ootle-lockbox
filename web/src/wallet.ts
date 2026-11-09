@@ -139,25 +139,41 @@ export function claimInstructions(net: NetConfig, account: string, lock: string)
     .buildUnsignedTransaction().instructions as Instruction[];
 }
 
+/*
+ * What Sapient returns. A dry run: `{transaction_id, result: ExecuteResult}`. A submit: a receipt
+ * `{transaction_id, result: "Pending" | {Rejected} | {Finalized: {final_decision, abort_details,
+ * execution_result: ExecuteResult}}}` (checked against a real Esmeralda receipt, Sapient 0.9.3).
+ * An ExecuteResult's `finalize` holds the engine's `result` and the `transaction_hash`.
+ */
+const reasonText = (x: unknown) => (typeof x === "string" ? x : JSON.stringify(x ?? null).slice(0, 300));
+
 /**
- * The engine's verdict inside an execution result: "accepted", the rejection reason, or null when
- * the shape isn't one we know. `finalize.result` is `{Accept}`, `{Reject}` or `{AcceptFeeRejectRest}`
- * (the fee is taken, nothing else happens).
+ * The network's verdict on a wallet result: "accepted", the rejection reason, or null when it
+ * isn't known (still pending, or a shape we don't recognise). The engine's `finalize.result` is
+ * `{Accept}`, `{Reject}` or `{AcceptFeeRejectRest}` (the fee is taken, nothing else happens); a
+ * submitted transaction must also have been committed.
  */
 export function engineVerdict(result: unknown): "accepted" | { rejected: string } | null {
-  const r = result as any;
-  const outcome = (r?.finalize ?? r?.result?.finalize)?.result;
+  const r = (result as any)?.result;
+  if (typeof r !== "object" || r === null) return null;
+  if ("Rejected" in r) return { rejected: reasonText(r.Rejected) };
+  let executed = r;
+  if ("Finalized" in r) {
+    const decision = r.Finalized?.final_decision;
+    if (decision === undefined) return null;
+    if (decision !== "Commit") return { rejected: `not committed: ${reasonText(r.Finalized.abort_details ?? decision)}` };
+    executed = r.Finalized.execution_result;
+  }
+  const outcome = executed?.finalize?.result;
   if (typeof outcome !== "object" || outcome === null) return null;
   if ("Accept" in outcome) return "accepted";
   const reason = "Reject" in outcome ? outcome.Reject : "AcceptFeeRejectRest" in outcome ? outcome.AcceptFeeRejectRest?.[1] : undefined;
-  if (reason === undefined) return null;
-  return { rejected: typeof reason === "string" ? reason : JSON.stringify(reason).slice(0, 300) };
+  return reason === undefined ? null : { rejected: reasonText(reason) };
 }
 
-/** The transaction hash in a submitted result (`finalize.transaction_hash`), or null if it has none. */
+/** The transaction hash in a submitted receipt (its execution result's `finalize.transaction_hash`), or null. */
 export function txHash(result: unknown): string | null {
-  const r = result as any;
-  const hash = (r?.finalize ?? r?.result?.finalize)?.transaction_hash;
+  const hash = (result as any)?.result?.Finalized?.execution_result?.finalize?.transaction_hash;
   return typeof hash === "string" && /^[0-9a-f]{64}$/i.test(hash) ? hash.toLowerCase() : null;
 }
 
@@ -305,12 +321,6 @@ async function follow(p: TariProvider, requestId: string, onStatus: (s: string) 
   }
 }
 
-/** The engine's rejection inside a submitted result, as an error message, or null. */
-function rejectionText(result: unknown): string | null {
-  const v = engineVerdict(result);
-  return v !== null && v !== "accepted" ? v.rejected : null;
-}
-
 /** How settling ended without a throw: nothing was saved, or the saved request never ran. */
 export type Settled = "nothing-saved" | "not-run";
 
@@ -325,13 +335,17 @@ async function settleSaved(p: TariProvider, net: NetConfig, onStatus: (s: string
   onStatus("Checking an earlier transaction from this browser...");
   const out = await follow(p, id, onStatus);
   if (out.status === "unknown") throw new TxBlocked(`An earlier Lockbox transaction failed in your wallet (${out.error}). ${UNKNOWN}`, id);
+  if (out.status === "not-run") {
+    clearSaved(net, id);
+    return "not-run"; // never executed: safe to go on
+  }
+  const v = engineVerdict(out.result);
+  if (v === null) throw new TxBlocked(`An earlier Lockbox transaction from this browser was sent, but your wallet didn't say how it ended. ${UNKNOWN}`, id);
   clearSaved(net, id);
-  if (out.status === "not-run") return "not-run"; // never executed: safe to go on
-  const rejected = rejectionText(out.result);
   throw new TxBlocked(
-    rejected
-      ? `An earlier Lockbox transaction from this browser was rejected by the network (${rejected}). Press again to continue.`
-      : "An earlier Lockbox transaction from this browser went through. Check your locks and wallet history before doing this again; press again to continue.",
+    v === "accepted"
+      ? "An earlier Lockbox transaction from this browser went through. Check your locks and wallet history before doing this again; press again to continue."
+      : `An earlier Lockbox transaction from this browser was rejected by the network (${v.rejected}). Press again to continue.`,
   );
 }
 
@@ -346,7 +360,8 @@ async function exclusive<T>(net: NetConfig, fn: () => Promise<T>): Promise<T> {
 
 /**
  * Opens the wallet's approval popup for `instructions` and submits once approved. Returns the
- * operation's result. Throws TxBlocked while an earlier transaction is unsettled. Sends nothing
+ * receipt only when the network accepted and committed it; throws when it was rejected or its
+ * outcome isn't known. Throws TxBlocked while an earlier transaction is unsettled. Sends nothing
  * once `stillHere()` is false (the user left the page that asked); a request already sent is
  * still followed to its outcome.
  */
@@ -372,10 +387,15 @@ export async function submit(
     localStorage.setItem(pendingKey(net), requestId);
     const out = await follow(p, requestId, onStatus);
     if (out.status === "unknown") throw new TxBlocked(`Your wallet reported a failure (${out.error}), possibly after sending the transaction. ${UNKNOWN}`, requestId);
+    if (out.status === "not-run") {
+      clearSaved(net, requestId);
+      throw new Error(out.error);
+    }
+    const v = engineVerdict(out.result);
+    // Tracking clears only on a definite outcome; an unreadable one stays saved and blocks repeats.
+    if (v === null) throw new TxBlocked(`Your wallet sent the transaction but didn't say how it ended. ${UNKNOWN}`, requestId);
     clearSaved(net, requestId);
-    if (out.status === "not-run") throw new Error(out.error);
-    const rejected = rejectionText(out.result);
-    if (rejected) throw new Error(`The network rejected the transaction: ${rejected}`);
+    if (v !== "accepted") throw new Error(`The network rejected the transaction: ${v.rejected}`);
     return out.result;
   });
 }
