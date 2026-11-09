@@ -6,6 +6,9 @@ import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h,
 import { formatAmount, type Check } from "../verify";
 import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, submit, TxBlocked, walletKey, walletNetwork } from "../wallet";
 
+/** Past this many epochs ahead (centuries at any epoch length) no date is estimated. */
+const MAX_DATED_EPOCHS = 10_000_000n;
+
 export async function lockView(net: NetConfig, id: string, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / lock"), loading());
   let epoch: number;
@@ -43,7 +46,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
   if (s) {
     const statusPill =
       l.status === "locked" ? pill("Locked", "ok") : l.status === "claimable" ? pill("Unlocked, not claimed", "warn") : pill("Claimed", "neutral");
-    const left = s.unlockEpoch - epoch;
+    const left = s.unlockEpoch - BigInt(epoch);
     const amountNow = l.vault?.amount;
     const div = r?.divisibility ?? 0;
     page.append(
@@ -74,9 +77,11 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
           h(
             "span",
             { class: "muted" },
-            left > 0
-              ? ` · in ${left} epochs (${epochsAsDuration(net, left)}, around ${estimatedDate(net, s.unlockEpoch, epoch)})`
-              : ` · reached ${-left} epochs ago`,
+            left > MAX_DATED_EPOCHS
+              ? ` · in ${left} epochs (centuries away)`
+              : left > 0n
+                ? ` · in ${left} epochs (${epochsAsDuration(net, Number(left))}, around ${estimatedDate(net, Number(s.unlockEpoch), epoch)})`
+                : ` · reached ${-left} epochs ago`,
           ),
         ),
         h("dt", {}, "Beneficiary key"),

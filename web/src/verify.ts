@@ -20,8 +20,8 @@ export interface Check {
 export interface LockState {
   vault: string;
   beneficiary: string; // public key, 64 hex chars
-  unlockEpoch: number;
-  lockedAtEpoch: number;
+  unlockEpoch: bigint; // u64 on chain; kept exact, since a valid lock may name any future epoch
+  lockedAtEpoch: bigint;
   lockedAmount: bigint;
   memo: string;
   claimed: boolean;
@@ -57,17 +57,26 @@ export type LockStatus = "locked" | "claimable" | "claimed";
 type Json = unknown;
 const isObj = (x: Json): x is Record<string, Json> => typeof x === "object" && x !== null && !Array.isArray(x);
 
-/** Accepts the numeric shapes the CBOR decoder produces (number, bigint, decimal string). */
+/**
+ * Accepts the numeric shapes the decoder produces: number, bigint, decimal string, or (in raw
+ * component state) a CBOR positive bignum, tag 2, used for values of 2^64 and above.
+ */
 export function toBigInt(x: Json): bigint | null {
   if (typeof x === "bigint") return x;
   if (typeof x === "number" && Number.isSafeInteger(x)) return BigInt(x);
   if (typeof x === "string" && /^\d+$/.test(x)) return BigInt(x);
+  if (isObj(x) && x["@cbor"] === "tag" && x.tag === 2 && isObj(x.value) && x.value["@cbor"] === "bytes") {
+    const hex = x.value.hex;
+    if (typeof hex === "string" && /^([0-9a-f]{2})*$/i.test(hex)) return hex === "" ? 0n : BigInt(`0x${hex}`);
+  }
   return null;
 }
 
-function toEpoch(x: Json): number | null {
+const U64_MAX = 2n ** 64n - 1n;
+
+function toEpoch(x: Json): bigint | null {
   const b = toBigInt(x);
-  return b !== null && b <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(b) : null;
+  return b !== null && b >= 0n && b <= U64_MAX ? b : null;
 }
 
 /** `{"@cbor":"bytes","hex":...}`, optionally wrapped in a CBOR tag, to a hex string. */
@@ -226,7 +235,7 @@ export function readResource(value: Json): ResourceReading | null {
 /** Locked until the epoch; then claimable until claimed. A claimed lock's vault is empty. */
 export function lockStatus(state: LockState, currentEpoch: number): LockStatus {
   if (state.claimed) return "claimed";
-  return currentEpoch < state.unlockEpoch ? "locked" : "claimable";
+  return BigInt(currentEpoch) < state.unlockEpoch ? "locked" : "claimable";
 }
 
 /** Amount in atomic units -> decimal text, exact (no floating point). */

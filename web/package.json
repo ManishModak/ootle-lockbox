@@ -12,7 +12,8 @@
   "dependencies": {
     "@tari-project/ootle": "0.14.0",
     "@tari-project/ootle-indexer": "0.14.0",
-    "@tari-project/ootle-wasm": "0.50.0"
+    "@tari-project/ootle-wasm": "0.50.0",
+    "@tari-project/ootle-wasm-bor": "0.50.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

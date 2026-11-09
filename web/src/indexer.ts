@@ -2,7 +2,8 @@
  * Read-only access to a network's public indexer. Events are used only to discover locks; every
  * page then re-reads the lock component, its vault and the token from current state.
  */
-import { decodeEvent, decodeSubstateValue } from "@tari-project/ootle";
+import { decodeEvent } from "@tari-project/ootle";
+import { decodeSubstateValue as decodeSubstateJson } from "@tari-project/ootle-wasm-bor";
 import type { NetConfig } from "./config";
 
 export class IndexerError extends Error {}
@@ -40,16 +41,41 @@ export async function getSubstate(net: NetConfig, id: string): Promise<Substate>
   const s = await getJson(`${net.indexer}/substates/${encodeURIComponent(id)}`);
   const enc = s?.state?.up?.substate;
   if (typeof enc !== "string") throw new IndexerError("This substate has been removed or is not readable.");
-  return { value: decodeSubstateValue(enc), version: Number(s.version), indexerVerified: s.verified === true };
+  let value: unknown;
+  try {
+    value = decodeSubstate(enc);
+  } catch {
+    throw new IndexerError("The indexer returned a substate that could not be decoded.");
+  }
+  return { value, version: Number(s.version), indexerVerified: s.verified === true };
+}
+
+/**
+ * Decodes a substate with integers beyond 2^53 kept exact as bigint. The SDK's own
+ * `decodeSubstateValue` runs plain `JSON.parse` on the same decoder output, which rounds them
+ * (one token of an 18-decimal token is already 10^18).
+ */
+export function decodeSubstate(encoded: string): unknown {
+  return parseJsonExact(decodeSubstateJson(encoded));
+}
+
+/**
+ * `JSON.parse` that turns integers outside the safe range into exact bigints, using the reviver's
+ * source text. A browser without that keeps the rounded number, which every reader here rejects
+ * as unsafe, so the page fails closed ("unable to verify") instead of showing a wrong value.
+ */
+export function parseJsonExact(text: string): unknown {
+  const reviver = (_key: string, value: unknown, context?: { source?: string }) =>
+    typeof value === "number" && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source)
+      ? BigInt(context.source)
+      : value;
+  return JSON.parse(text, reviver as (key: string, value: unknown) => unknown);
 }
 
 export interface LockEvent {
   tx: string;
   lock: string;
   resource: string;
-  amount: string;
-  beneficiary: string;
-  unlockEpoch: number;
 }
 
 /**
@@ -84,9 +110,6 @@ export async function lockCreatedEvents(net: NetConfig, maxPages = 5): Promise<{
         tx,
         lock: p.lock,
         resource: String(p.resource),
-        amount: String(p.amount),
-        beneficiary: String(p.beneficiary),
-        unlockEpoch: Number(p.unlock_epoch),
       });
     }
     if (typeof r.next_before_id !== "number" || (r.events ?? []).length < 100) return { events: out, complete: decoded };

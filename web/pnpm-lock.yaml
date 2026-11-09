@@ -17,6 +17,9 @@ importers:
       '@tari-project/ootle-wasm':
         specifier: 0.50.0
         version: 0.50.0
+      '@tari-project/ootle-wasm-bor':
+        specifier: 0.50.0
+        version: 0.50.0
     devDependencies:
       typescript:
         specifier: ^7.0.2

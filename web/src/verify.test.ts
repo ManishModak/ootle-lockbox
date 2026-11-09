@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import lockFixture from "./fixtures/esmeralda-lock.json";
 import vaultFixture from "./fixtures/esmeralda-lock-vault.json";
 import tariFixture from "./fixtures/esmeralda-tari-resource.json";
+import bigLockFixture from "./fixtures/esmeralda-launch-lock.json";
 import {
   formatAmount,
   lockedShare,
@@ -24,11 +25,19 @@ describe("readLock", () => {
     expect(r.state).toMatchObject({
       vault: "vault_c5f672cbfd572ba9cbaa1350984dd764a8045fcb098ac07efefa295a79453786",
       beneficiary: BENEFICIARY,
-      unlockEpoch: 12932,
-      lockedAtEpoch: 12931,
+      unlockEpoch: 12932n,
+      lockedAtEpoch: 12931n,
       lockedAmount: 1000000n,
       claimed: true,
     });
+  });
+
+  // Amounts above 2^64 arrive as CBOR bignums (tag 2): an 18-decimal token passes that at ~18.4 tokens.
+  it("reads a lock of an 18-decimal token holding more than 2^64 atomic units", () => {
+    const r = readLock(bigLockFixture, "3f77a82e2eecb1795bc250ce919706519ea8feacc283d25f9e9740edc81b12b3");
+    expect(r.genuine).toBe(true);
+    expect(r.state?.lockedAmount).toBe(200_000n * 10n ** 18n);
+    expect(r.state?.unlockEpoch).toBe(12969n);
   });
 
   it("rejects a component from another template", () => {

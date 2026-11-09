@@ -1,0 +1,58 @@
+{
+ "Component": {
+  "header": {
+   "template_address": "3f77a82e2eecb1795bc250ce919706519ea8feacc283d25f9e9740edc81b12b3",
+   "owner_rule": "None",
+   "access_rules": {
+    "method_access": {
+     "claim": {
+      "Restricted": {
+       "Require": {
+        "Require": {
+         "NonFungibleAddress": {
+          "resource_address": "resource_0100000000000000000000000000000000000000000000000000000000000000",
+          "id": {
+           "U256": "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017"
+          }
+         }
+        }
+       }
+      }
+     },
+     "info": "AllowAll"
+    },
+    "default": "DenyAll"
+   },
+   "entity_id": "fd",
+   "upgrade_rule": "Locked"
+  },
+  "body": {
+   "state": [
+    {
+     "@cbor": "tag",
+     "tag": 132,
+     "value": {
+      "@cbor": "bytes",
+      "hex": "fd5e23824d4c304c8da5550f55cc993a0cffb0435154aaf3cf7912dad8ee0771"
+     }
+    },
+    {
+     "@cbor": "bytes",
+     "hex": "f6e42c6b84bf67290a401d55daa49f332ca2acdab86da7b1210b2a1d8eebd017"
+    },
+    12969,
+    12967,
+    {
+     "@cbor": "tag",
+     "tag": 2,
+     "value": {
+      "@cbor": "bytes",
+      "hex": "2a5a058fc295ed000000"
+     }
+    },
+    "launch component_c6c56ae085f622a8b083419c48bfa82e3c3746cb18e941a0548000bbf6eab880",
+    false
+   ]
+  }
+ }
+}

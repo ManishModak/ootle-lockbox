@@ -85,7 +85,7 @@ export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | nul
       {},
       h("td", {}, link(net, `lock/${l.id}`, h("code", { title: l.id }, l.id.slice(10, 22)))),
       h("td", { class: "num" }, l.vault?.amount != null ? `${formatAmount(l.vault.amount, d)} ${l.resource?.symbol ?? ""}`.trim() : "—"),
-      h("td", {}, s ? `epoch ${s.unlockEpoch}${s.unlockEpoch > epoch ? ` (in ${s.unlockEpoch - epoch})` : ""}` : "—"),
+      h("td", {}, s ? `epoch ${s.unlockEpoch}${s.unlockEpoch > BigInt(epoch) ? ` (in ${s.unlockEpoch - BigInt(epoch)})` : ""}` : "—"),
       h(
         "td",
         {},
