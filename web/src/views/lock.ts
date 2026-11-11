@@ -3,7 +3,7 @@ import type { NetConfig } from "../config";
 import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
 import { lockChecks, notesLine } from "../proofcopy";
-import { addressLine, epochsAsDuration, errorText, estimatedDate, h, link, loadError, loading, onThisPage, proofTitle, short, statusPill, verdictPanel } from "../ui";
+import { addressLine, epochsAsDuration, errorText, estimatedDate, h, link, loadError, onThisPage, proofSkeleton, proofTitle, reducedMotion, short, statusPill, verdictPanel } from "../ui";
 import { tokenAmount, type Check } from "../verify";
 import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, requireWalletNetwork } from "../wallet";
 
@@ -11,7 +11,7 @@ import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvid
 const MAX_DATED_EPOCHS = 10_000_000n;
 
 export async function lockView(net: NetConfig, id: string, root: HTMLElement) {
-  root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / lock"), loading());
+  root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / lock"), proofSkeleton("Loading the lock…"));
   let epoch: number;
   let l: LoadedLock;
   try {
@@ -59,8 +59,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
   // claim comes only after the checks have been read.
   const claim = s && l.status === "claimable" && l.reading.genuine ? claimBox(net, l) : null;
   const goToClaim = () => {
-    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    claim?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+    claim?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
     claim?.querySelector("button")?.focus({ preventScroll: true });
   };
   const toClaim = claim && v === "verified" ? h("p", { class: "verdict-action" }, h("button", { type: "button", class: "small", onclick: goToClaim }, "Claim tokens")) : null;

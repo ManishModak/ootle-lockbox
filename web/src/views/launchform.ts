@@ -7,13 +7,14 @@ import type { NetConfig } from "../config";
 import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { isThisLaunch, LAUNCH_DECIMALS, launchProblem, MAX_LAUNCH_LOCKS, type LaunchInput, type LaunchLockInput } from "../newlaunch";
 import { MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, estimatedDate, flowSteps, formatDate, h, notice, onThisPage } from "../ui";
+import { errorText, flowSteps, h, notice, onThisPage } from "../ui";
 import { loadLaunch } from "../lockdata";
 import { formatAmount, parseAmount } from "../verify";
 import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, txHash, walletKey, requireWalletNetwork } from "../wallet";
 import { setFormBusy, showTxError } from "./lock";
 import { launchCrumb, launchEyebrow } from "./launch";
 import { notPublishedNotice } from "./home";
+import { unlockPicker, unlockTerms, type UnlockPicker } from "./unlockpicker";
 
 const CLI_URL = "https://github.com/ManishModak/ootle-launch-commitments";
 
@@ -32,7 +33,7 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
     h(
       "p",
       {},
-      `Creates a fixed-supply token that nobody, you included, can ever mint, burn, freeze or change, and locks the allocations you choose in Lockbox, in one transaction. The flat fee is ${formatAmount(fee, 6)} TARI, paid from your public TARI balance.`,
+      `Create a token with a fixed supply that nobody can ever mint, burn, freeze or change, not even you. The allocations you choose go into Lockbox locks in the same transaction. The flat fee is ${formatAmount(fee, 6)} TARI, paid from your public TARI balance.`,
     ),
     btn,
     status,
@@ -85,7 +86,7 @@ let rowIds = 0;
 interface LockRow {
   el: HTMLElement;
   amount: HTMLInputElement;
-  when: HTMLInputElement;
+  when: UnlockPicker;
   key: HTMLInputElement;
 }
 
@@ -107,7 +108,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, epoch
     const n = ++rowIds;
     const r: LockRow = {
       amount: h("input", { id: `alloc-amount-${n}`, type: "text", inputmode: "decimal", autocomplete: "off", placeholder: "e.g. 200000" }) as HTMLInputElement,
-      when: h("input", { id: `alloc-when-${n}`, type: "datetime-local" }) as HTMLInputElement,
+      when: unlockPicker(net, epoch, `alloc-when-${n}`),
       key: h("input", { id: `alloc-key-${n}`, type: "text", autocomplete: "off", spellcheck: "false", placeholder: "otl_… or 64-hex key", "aria-describedby": `alloc-key-help-${n}` }) as HTMLInputElement,
       el: h("fieldset", { class: "lock-row" }),
     };
@@ -122,8 +123,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, epoch
       h("legend", {}),
       h("label", { for: r.amount.id }, "Amount"),
       r.amount,
-      h("label", { for: r.when.id }, "Unlock after"),
-      r.when,
+      r.when.el,
       h("label", { for: r.key.id }, "Beneficiary (who can claim)"),
       r.key,
       h("p", { class: "muted small help", id: `alloc-key-help-${n}` }, "Leave blank to make yourself the beneficiary."),
@@ -149,7 +149,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, epoch
     h("label", { for: "supply" }, `Total supply (${LAUNCH_DECIMALS} decimals)`),
     supply,
     h("h2", {}, "Allocations to lock"),
-    h("p", { class: "muted small" }, "Each lock holds its amount until the chosen time; only its beneficiary can then claim it. The rest of the supply comes to your wallet."),
+    h("p", { class: "muted small" }, "Each allocation stays locked until its unlock time. Then only its beneficiary can claim it. The rest of the supply goes to your wallet."),
     list,
     add,
     errors,
@@ -196,7 +196,7 @@ function readForm(
   for (const [i, r] of rows.entries()) {
     const amount = parseAmount(r.amount.value, LAUNCH_DECIMALS);
     if (amount === null) return `Allocation ${i + 1}: enter an amount with at most ${LAUNCH_DECIMALS} decimals.`;
-    const target = r.when.value ? Date.parse(r.when.value) : Number.NaN;
+    const target = r.when.target();
     const epoch = unlockEpochFor(net, now, target, Date.now());
     if (epoch === null) return `Allocation ${i + 1}: pick an unlock time in the future.`;
     const key = r.key.value.trim() === "" ? myKey : parseBeneficiary(r.key.value, NETWORK_BYTE[net.name]);
@@ -251,7 +251,7 @@ function reviewBox(
               "tr",
               {},
               h("td", { class: "num", "data-label": "Amount" }, `${formatAmount(l.amount, LAUNCH_DECIMALS)} ${sym}`),
-              h("td", { "data-label": "Unlocks" }, `epoch ${l.unlockEpoch}, most likely around ${estimatedDate(net, Number(l.unlockEpoch), epoch)}; after ${formatDate(targets[i])} unless epochs run shorter than ${net.epochMinutes.min} minutes`),
+              h("td", { "data-label": "Unlocks" }, ...unlockTerms(net, Number(l.unlockEpoch), epoch, targets[i])),
               h("td", { "data-label": "Beneficiary" }, h("code", { class: "wrap" }, l.beneficiary), l.beneficiary === myKey ? " (you)" : ""),
             ),
           ),
@@ -261,7 +261,7 @@ function reviewBox(
     notice(
       "bad",
       h("strong", {}, "This can't be undone. "),
-      "Nobody, you included, can ever mint more, burn, freeze or change this token. Each lock holds its tokens until its epoch, and only the key shown can claim them: check every key carefully.",
+      "Nobody can ever mint more, burn, freeze or change this token, not even you. Each lock holds its tokens until its epoch, and only the key shown can claim them. Check every key carefully.",
     ),
   );
   const status = h("p", { class: "muted", "aria-live": "polite" });

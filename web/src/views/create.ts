@@ -5,11 +5,12 @@
 import { MAX_MEMO_BYTES, REPO_URL, type NetConfig } from "../config";
 import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, epochsAsDuration, estimatedDate, flowSteps, formatDate, h, link, notice, onThisPage } from "../ui";
+import { errorText, flowSteps, h, link, notice, onThisPage } from "../ui";
 import { formatAmount, parseAmount, readResource } from "../verify";
 import { balances, connect, dryRun, getProvider, lockInstructions, settleEarlier, submit, txHash, walletKey, requireWalletNetwork, type Balance } from "../wallet";
 import { checkList, setFormBusy, showTxError } from "./lock";
 import { notPublishedNotice } from "./home";
+import { unlockPicker, unlockTerms } from "./unlockpicker";
 
 export async function createView(net: NetConfig, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / create"), h("h1", {}, "Create a lock"));
@@ -22,7 +23,7 @@ export async function createView(net: NetConfig, root: HTMLElement) {
   const intro = h(
     "section",
     { class: "card intro" },
-    h("p", {}, `You need the Sapient wallet extension on ${net.label}, holding the tokens you want to lock as a public balance.`),
+    h("p", {}, `You need the Sapient wallet extension on ${net.label}. The tokens you lock must be a public balance in it.`),
     btn,
     status,
     h("p", { class: "muted small" }, "No wallet? Lock from a terminal with ", h("a", { href: REPO_URL }, "lockbox-cli"), "."),
@@ -70,12 +71,11 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
   if (list.length === 0) {
     return notice("warn", "This account has no public token balance to lock. Private TARI must be made public (unshielded) in Sapient first.");
   }
-  const label = (b: Balance) => `${b.symbol ?? b.name ?? b.resourceAddress.slice(0, 18)} — ${formatAmount(BigInt(b.amount), b.divisibility)} available`;
+  const label = (b: Balance) => `${b.symbol ?? b.name ?? b.resourceAddress.slice(0, 18)} · ${formatAmount(BigInt(b.amount), b.divisibility)} available`;
   const token = h("select", { id: "token" }, ...list.map((b, i) => h("option", { value: String(i) }, label(b)))) as HTMLSelectElement;
   const amount = h("input", { id: "amount", type: "text", inputmode: "decimal", autocomplete: "off", placeholder: "0.0" }) as HTMLInputElement;
   const max = h("button", { type: "button", class: "ghost small" }, "Max");
-  const when = h("input", { id: "when", type: "datetime-local" }) as HTMLInputElement;
-  const whenOut = h("p", { class: "muted small", "aria-live": "polite" });
+  const when = unlockPicker(net, epoch, "when");
   const meRadio = h("input", { type: "radio", name: "ben", value: "me", checked: true }) as HTMLInputElement;
   const otherRadio = h("input", { type: "radio", name: "ben", value: "other" }) as HTMLInputElement;
   const other = h("input", { id: "other", type: "text", placeholder: "otl_… or 64-hex public key", autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
@@ -92,15 +92,8 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
   const lockable = (b: Balance) => lockableAmount(b.resourceAddress, BigInt(b.amount));
   max.addEventListener("click", () => (amount.value = formatAmount(lockable(chosen()), chosen().divisibility).replace(/,/g, "")));
 
-  // A preview only: the epoch is fetched again at review and again before signing.
-  const target = () => (when.value ? Date.parse(when.value) : Number.NaN);
-  when.addEventListener("input", () => {
-    const e = unlockEpochFor(net, epoch, target(), Date.now());
-    whenOut.textContent =
-      e === null
-        ? "Pick a time in the future."
-        : `Most likely opens around ${estimatedDate(net, e, epoch)} (${epochsAsDuration(net, e - epoch)} from now). Epochs take about ${net.epochMinutes.typical} minutes; it opens after ${formatDate(target())} as long as they stay at least ${net.epochMinutes.min} minutes. Faster blocks would open it earlier.`;
-  });
+  // The picker's line is a preview only: the epoch is fetched again at review and again before signing.
+  const target = () => when.target();
 
   const beneficiary = (): string | null => (meRadio.checked ? myKey : parseBeneficiary(other.value, NETWORK_BYTE[net.name]));
 
@@ -112,9 +105,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
     token,
     h("label", { for: "amount" }, "Amount"),
     h("div", { class: "row" }, amount, max),
-    h("label", { for: "when" }, "Unlock after"),
-    when,
-    whenOut,
+    when.el,
     h(
       "fieldset",
       {},
@@ -205,7 +196,7 @@ async function reviewBox(
       h("dt", {}, "Lock"),
       h("dd", { class: "big" }, `${formatAmount(amount, b.divisibility)} ${sym}`),
       h("dt", {}, "Until"),
-      h("dd", {}, `epoch ${unlockEpoch}, most likely around ${estimatedDate(net, unlockEpoch, epoch)}; after ${formatDate(target)} unless epochs run shorter than ${net.epochMinutes.min} minutes`),
+      h("dd", {}, ...unlockTerms(net, unlockEpoch, epoch, target)),
       h("dt", {}, "Network fee"),
       h("dd", {}, `up to ${formatAmount(MAX_FEE, 6)} TARI`),
       h("dt", {}, "Beneficiary"),

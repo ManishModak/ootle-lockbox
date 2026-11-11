@@ -7,7 +7,7 @@ import { currentEpoch, indexerHost } from "../indexer";
 import type { Fact } from "../launch";
 import { loadLaunch, verdict, type LoadedLaunch, type LoadedLock } from "../lockdata";
 import { factText, launchVerdict, stillLockedText, type LaunchFactName } from "../proofcopy";
-import { addressLine, h, link, loadError, loading, notice, pill, proofTitle, statusPill, verdictPanel, verdictPill } from "../ui";
+import { addressLine, h, link, loadError, notice, pill, proofSkeleton, proofTitle, statusPill, verdictPanel, verdictPill } from "../ui";
 import { tokenAmount } from "../verify";
 import { checksSection } from "./lock";
 import { notPublishedNotice } from "./home";
@@ -28,7 +28,7 @@ export async function launchView(net: NetConfig, id: string, root: HTMLElement) 
     root.append(launchEyebrow(), h("h1", {}, "Launch proof"), notPublishedNotice(net, "Launch Commitments", `launch/${id}`, "Look on Esmeralda testnet"));
     return;
   }
-  root.append(loading());
+  root.append(proofSkeleton("Loading the launch proof…"));
   let epoch: number;
   let l: LoadedLaunch;
   try {

@@ -3,7 +3,7 @@ import type { NetConfig } from "../config";
 import { currentEpoch, getSubstate, indexerHost, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, verdict, type LoadedLock } from "../lockdata";
 import { lockedTotalLine, lockReadGaps, notesLine, tokenVerdict } from "../proofcopy";
-import { addressLine, errorText, h, link, loadError, loading, notice, onThisPage, proofTitle, reloadPage, statusPill, verdictPanel, verdictPill } from "../ui";
+import { addressLine, errorText, h, lineSkeleton, link, loadError, notice, onThisPage, proofSkeleton, proofTitle, reloadPage, statusPill, tableSkeleton, verdictPanel, verdictPill } from "../ui";
 import { lockedShare, readResource, tokenAmount, type ResourceReading } from "../verify";
 import { checkList, notesList } from "./lock";
 
@@ -12,7 +12,7 @@ const MAX_EVENT_PAGES = 20;
 const MAX_LOCKS = 200;
 
 export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
-  root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / token"), loading());
+  root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / token"), proofSkeleton("Loading the token…"));
   let epoch: number;
   let r: ResourceReading | null;
   try {
@@ -32,7 +32,7 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
   const note = notesLine(r.notes, "locks");
   const v = tokenVerdict(r);
   // Filled in once the locks are read: the live locked amount sits in the verdict panel.
-  const total = h("p", { class: "verdict-summary" }, h("span", { class: "muted" }, "Counting what is still locked…"));
+  const total = h("p", { class: "verdict-summary" }, lineSkeleton("Counting what is still locked…"));
   const parts: (HTMLElement | null)[] = [
     proofTitle(h("h1", {}, title, r.symbol && r.name ? h("span", { class: "muted" }, ` (${r.symbol})`) : null)),
     h("p", { class: "title-sub" }, addressLine(id)),
@@ -81,7 +81,7 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
  * the whole page, so the epoch and token reading are as fresh as the locks.
  */
 async function showLocks(net: NetConfig, id: string, r: ResourceReading, epoch: number, section: HTMLElement, total: HTMLElement) {
-  const body = h("div", {}, loading("Looking for locks…"));
+  const body = h("div", {}, tableSkeleton(LOCK_COLUMNS, "Looking for locks…"));
   section.append(body);
   const here = onThisPage();
   try {
@@ -132,6 +132,9 @@ function lockedTotal(locks: LoadedLock[], div: number | null, symbol: string | n
 function lockedNowOf(locks: LoadedLock[]): bigint {
   return locks.filter((l) => l.reading.genuine && l.status === "locked" && l.vault?.amount).reduce((sum, l) => sum + (l.vault!.amount ?? 0n), 0n);
 }
+
+/** The columns of a lock table, also used for its loading placeholder. */
+export const LOCK_COLUMNS = ["Lock", "Holding", "Unlocks", "Status"];
 
 /** Locks as a table: each one's holding (in its own token's precision), unlock epoch, lifecycle and verdict. */
 export function lockTable(net: NetConfig, locks: LoadedLock[], epoch: number): HTMLElement {

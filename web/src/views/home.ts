@@ -2,8 +2,8 @@
 import { NETWORKS, REPO_URL, type NetConfig } from "../config";
 import { currentEpoch, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, type LoadedLock } from "../lockdata";
-import { errorText, h, link, loading, notice } from "../ui";
-import { lockTable } from "./token";
+import { errorText, h, link, notice, reducedMotion, tableSkeleton } from "../ui";
+import { LOCK_COLUMNS, lockTable } from "./token";
 
 const RECENT = 15;
 
@@ -47,7 +47,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
     else lookupError.textContent = "Paste a full lock (component_…) or token (resource_…) address.";
   });
 
-  const howItWorks = h("button", { type: "button", class: "ghost", onclick: () => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" }) }, "How it works");
+  const howItWorks = h("button", { type: "button", class: "ghost", onclick: () => document.getElementById("how")?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth" }) }, "How it works");
   // Without the template here, the first action is the testnet, where both templates are published.
   const actions = net.lockboxTemplate
     ? [h("div", { class: "row" }, link(net, "create", "Create a lock", "button"), howItWorks)]
@@ -63,7 +63,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
         h(
           "p",
           { class: "lede" },
-          "Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early — unless the token's own rules let its issuer do so. Each lock's proof page checks whether they do. No Lockbox fee; network fees apply.",
+          "Lock tokens for a beneficiary until a set epoch. Nobody can take them out early, not even you. The one exception is a token whose own rules let its issuer pull them back, and every lock's proof page checks for that. No Lockbox fee, only network fees.",
         ),
         ...actions,
       ),
@@ -79,7 +79,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
   );
 
   if (net.lockboxTemplate) {
-    const recent = h("section", { class: "recent" }, h("h2", {}, "Recent locks"), loading());
+    const recent = h("section", { class: "recent" }, h("h2", {}, "Recent locks"), tableSkeleton(LOCK_COLUMNS, "Loading recent locks…"));
     root.append(recent);
     void loadRecent(net, recent);
   }
@@ -95,7 +95,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
         h(
           "p",
           {},
-          "Creates a fixed-supply token that nobody, you included, can ever mint, burn, freeze or change, and locks the allocations you choose in Lockbox, in one transaction.",
+          "Create a token with a fixed supply that nobody can ever mint, burn, freeze or change, not even you. The allocations you choose go into Lockbox locks in the same transaction.",
         ),
         net.launchTemplate ? null : h("p", { class: "muted small" }, `Launch Commitments isn't published on ${net.name === "mainnet" ? "mainnet" : net.label} yet.`),
       ),
@@ -111,9 +111,9 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
       h(
         "ol",
         { class: "steps" },
-        h("li", {}, "You lock tokens with your wallet: amount, unlock epoch, beneficiary key and an optional memo."),
-        h("li", {}, "Lockbox creates a lock that holds them. It has no owner, no admin and no upgrade path, so it can only do one thing."),
-        h("li", {}, "From the unlock epoch, only the beneficiary can claim, and gets everything in one step."),
+        h("li", {}, "In your wallet, pick the tokens, the unlock time and who can claim them. A memo is optional."),
+        h("li", {}, "Lockbox puts them in a lock with no owner, no admin and no upgrades. It can only do one thing."),
+        h("li", {}, "Once the unlock epoch arrives, the beneficiary claims everything in one step. Nobody else can."),
         h("li", {}, "Anyone can open the lock's proof page and check it against the chain."),
       ),
       h(
@@ -123,17 +123,24 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
         h(
           "p",
           {},
-          "A lock can't override the token's own rules. If the token's issuer kept the power to recall, freeze or block transfers, or owns the token, they could still undo a lock. The proof page reads the token's rules and only shows ",
+          "A lock can't override the token's own rules. If the issuer kept the power to recall, freeze or block transfers, they could still undo a lock. The proof page reads those rules and shows ",
           h("strong", {}, "Verified"),
-          " when no such power exists.",
+          " only when no such power exists.",
         ),
       ),
       h(
-        "p",
-        { class: "muted small fine" },
-        "Epochs, not dates, decide when a lock opens. Epoch length varies, so dates shown here are estimates; a new lock is set to open after the time you pick, assuming epochs don't run much faster than usual. Epochs count base-layer blocks, so if Tari ever changes how many blocks make an epoch, locks would open at a different time. Locks hold public token balances; private TARI must be made public in your wallet first. ",
-        h("a", { href: REPO_URL }, "Source code (MIT)"),
-        ".",
+        "section",
+        { class: "good-to-know", "aria-labelledby": "gtk-title" },
+        h("h3", { id: "gtk-title" }, "Good to know"),
+        h(
+          "ul",
+          {},
+          h("li", {}, `Locks open at an epoch, not a date. Dates you see are estimates (an epoch is about ${NETWORKS.mainnet.epochMinutes.typical} minutes on mainnet).`),
+          h("li", {}, "A new lock is set so it can't open before the time you pick."),
+          h("li", {}, "Epochs count base-layer blocks. If Tari changes how many blocks make an epoch, unlock times shift too."),
+          h("li", {}, "Locks hold public balances. Make private TARI public in your wallet first."),
+          h("li", {}, h("a", { href: REPO_URL }, "Open source (MIT)")),
+        ),
       ),
     ),
   );

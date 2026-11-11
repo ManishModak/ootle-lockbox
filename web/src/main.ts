@@ -4,7 +4,8 @@
  */
 import "./style.css";
 import { DEFAULT_NETWORK, NETWORKS, REPO_URL, type NetConfig, type NetworkName } from "./config";
-import { h, logo, startPage } from "./ui";
+import { networkMenu } from "./netmenu";
+import { h, logo, reducedMotion, startPage } from "./ui";
 import { createView } from "./views/create";
 import { homeView } from "./views/home";
 import { launchView } from "./views/launch";
@@ -26,12 +27,6 @@ function parseRoute(): Route {
 }
 
 function header(net: NetConfig): HTMLElement {
-  const select = h(
-    "select",
-    { "aria-label": "Network" },
-    ...Object.values(NETWORKS).map((c) => h("option", { value: c.name, selected: c.name === net.name }, c.label)),
-  ) as HTMLSelectElement;
-  select.addEventListener("change", () => (location.hash = `#/${select.value}`));
   // Only the form pages themselves are "current": a launch proof shares the "launch" route but isn't the form.
   const here = parseRoute();
   const navLink = (page: string, text: string) =>
@@ -44,7 +39,7 @@ function header(net: NetConfig): HTMLElement {
       { class: "top-inner" },
       h("a", { href: `#/${net.name}`, class: "brand" }, logo(), "Lockbox"),
       h("nav", { "aria-label": "Main" }, navLink("create", "Create a lock"), navLink("launch", "Launch a token")),
-      h("span", { class: `net net-${net.name}` }, h("span", { class: "net-dot", "aria-hidden": "true" }), select),
+      networkMenu(net),
     ),
   );
 }
@@ -60,17 +55,30 @@ function footer(): HTMLElement {
       h("a", { href: REPO_URL }, "GitHub"),
       " · Built on ",
       h("a", { href: "https://ootle.tari.com" }, "Tari Ootle"),
-      ". Lockbox is software, not an offer of any token, and holds nothing for anyone. Locks carry no Lockbox fee; launching a token charges a flat launch fee, shown before you sign.",
+      ". Lockbox is software. It holds nothing for anyone and offers no token. Locks have no Lockbox fee. Launching a token has a flat fee, shown before you sign.",
     ),
   );
 }
 
-async function render() {
-  startPage();
-  const route = parseRoute();
-  const main = h("main");
-  document.body.replaceChildren(header(route.net), main, footer());
-  window.scrollTo(0, 0);
+/**
+ * Shows the page for the current hash. The swap itself is synchronous (each view puts up its
+ * frame and loading placeholders before its first await), so a route change can cross-fade with
+ * the View Transitions API where supported. The first render and reduced motion swap plainly.
+ */
+function render(animate: boolean) {
+  const swap = () => {
+    startPage();
+    const route = parseRoute();
+    const main = h("main");
+    document.body.replaceChildren(header(route.net), main, footer());
+    window.scrollTo(0, 0);
+    void showPage(route, main);
+  };
+  if (animate && document.startViewTransition && !reducedMotion()) document.startViewTransition(swap);
+  else swap();
+}
+
+async function showPage(route: Route, main: HTMLElement) {
   const banner = pendingBanner(route.net);
   if (banner) main.append(banner);
   const valid = (prefix: string) => new RegExp(`^${prefix}_[0-9a-f]{64}$`, "i").test(route.id);
@@ -82,5 +90,5 @@ async function render() {
   else await homeView(route.net, main);
 }
 
-window.addEventListener("hashchange", () => void render());
-void render();
+window.addEventListener("hashchange", () => render(true));
+render(false);

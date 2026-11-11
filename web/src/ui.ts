@@ -50,16 +50,25 @@ export function link(net: NetConfig, path: string, text: Child, cls?: string): H
   return h("a", { href: `#/${net.name}/${path}`, class: cls }, text);
 }
 
+/** A Copy button; after copying it briefly shows a check and "Copied", keeping its width. */
 export function copyButton(value: string, label = "Copy"): HTMLElement {
-  const b = h("button", { class: "ghost small", type: "button", title: value }, label);
+  const b = h("button", { class: "ghost small copy", type: "button", title: value }, label);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   b.addEventListener("click", async () => {
+    b.style.minWidth = `${b.offsetWidth}px`;
     try {
       await navigator.clipboard.writeText(value);
-      b.textContent = "Copied";
+      b.replaceChildren(checkIcon(), "Copied");
+      b.classList.add("copied");
     } catch {
       b.textContent = "Copy failed";
     }
-    setTimeout(() => (b.textContent = label), 1500);
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      b.textContent = label;
+      b.classList.remove("copied");
+      b.style.minWidth = "";
+    }, 1500);
   });
   return b;
 }
@@ -134,6 +143,11 @@ export function logo(): Element {
   return svg(
     `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M10 14v-4a6 6 0 0 1 12 0v4" fill="none" stroke="currentColor" stroke-width="3"/><rect x="5" y="13" width="22" height="16" rx="4" fill="currentColor"/><path d="M11.5 21l3 3 6-6.5" fill="none" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   );
+}
+
+/** A small check mark, e.g. on a Copy button after copying or beside the current network. */
+export function checkIcon(): Element {
+  return svg(`<svg class="check-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
 }
 
 type Verdict = "ok" | "warn" | "bad";
@@ -221,8 +235,57 @@ export function flowSteps(...steps: string[]): HTMLElement {
   return h("ol", { class: "flow-steps", "aria-label": "What happens" }, ...steps.map((s) => h("li", {}, s)));
 }
 
-export function loading(text = "Loading…"): HTMLElement {
-  return h("p", { class: "muted loading", "aria-live": "polite" }, text);
+/** True when the viewer asked for reduced motion; every animation and smooth scroll checks it. */
+export function reducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * Placeholders shaped like what is loading, with a soft shimmer (none under reduced motion).
+ * Each is one element, so a view replaces or removes it when its data arrives. The shapes are
+ * hidden from screen readers, which hear `label` from a polite status instead. All carry the
+ * `loading` class so tests and scripts can wait for it to go.
+ */
+function skeletonBox(tag: string, cls: string, label: string, ...shape: Child[]): HTMLElement {
+  return h(tag, { class: `loading ${cls}`, role: "status" }, h("span", { class: "sr" }, label), h(tag, { class: "sk-shape", "aria-hidden": "true" }, ...shape));
+}
+const bar = (cls = "") => h("span", { class: `sk ${cls}` });
+
+/** A table of `rows` placeholder rows under the real column names (cards on a phone, like the table). */
+export function tableSkeleton(columns: string[], label = "Loading…", rows = 3): HTMLElement {
+  const widths = ["w-60", "w-45", "w-75"];
+  return skeletonBox(
+    "div",
+    "sk-table",
+    label,
+    h(
+      "div",
+      { class: "table-wrap" },
+      h(
+        "table",
+        { class: "stack" },
+        h("thead", {}, h("tr", {}, ...columns.map((c) => h("th", {}, c)))),
+        h("tbody", {}, ...Array.from({ length: rows }, (_, r) => h("tr", {}, ...columns.map((c, i) => h("td", { "data-label": c }, bar(widths[(r + i) % widths.length])))))),
+      ),
+    ),
+  );
+}
+
+/** A proof page's top while it loads: title and address lines, then the verdict panel's seal and text. */
+export function proofSkeleton(label = "Loading…"): HTMLElement {
+  return skeletonBox(
+    "div",
+    "sk-proof",
+    label,
+    h("div", { class: "sk-title" }, bar("sk-h1"), bar("sk-addr")),
+    h("div", { class: "sk-verdict" }, h("span", { class: "sk sk-seal" }), h("div", { class: "sk-lines" }, bar("sk-vtitle"), bar("w-75"), bar("w-45"))),
+    h("div", { class: "sk-facts" }, ...Array.from({ length: 4 }, () => h("div", { class: "sk-fact" }, bar("w-60"), bar("w-75")))),
+  );
+}
+
+/** One inline placeholder line, e.g. a total that is still being counted. */
+export function lineSkeleton(label = "Loading…"): HTMLElement {
+  return skeletonBox("span", "sk-inline", label, bar("sk-line"));
 }
 
 export function errorText(e: unknown): string {
