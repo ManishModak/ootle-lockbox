@@ -98,8 +98,59 @@ export function notice(kind: "info" | "warn" | "bad" | "ok", ...children: Child[
   return h("div", { class: `notice ${kind}`, role: kind === "bad" ? "alert" : undefined }, ...children);
 }
 
+/** Builds an inline SVG from a fixed markup string in this file (never from chain data). */
+function svg(markup: string): Element {
+  const t = document.createElement("template");
+  t.innerHTML = markup.trim();
+  return t.content.firstElementChild!;
+}
+
+/** The Lockbox mark: a padlock with a check, used in the header. */
+export function logo(): Element {
+  return svg(
+    `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M10 14v-4a6 6 0 0 1 12 0v4" fill="none" stroke="currentColor" stroke-width="3"/><rect x="5" y="13" width="22" height="16" rx="4" fill="currentColor"/><path d="M11.5 21l3 3 6-6.5" fill="none" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  );
+}
+
+type Verdict = "ok" | "warn" | "bad";
+const SEAL_GLYPH: Record<Verdict, string> = {
+  ok: `<path d="M22 33.5l7 7 14-15.5" stroke-width="4.5"/>`,
+  warn: `<path d="M32 20v15" stroke-width="4.5"/><path d="M32 43.5v.5" stroke-width="5.5"/>`,
+  bad: `<path d="M24 24l16 16M40 24L24 40" stroke-width="4.5"/>`,
+};
+
+/** A notary-style seal for a verdict: ribbed ring, tinted disc, and a check, mark or cross. */
+export function seal(kind: Verdict): Element {
+  return svg(
+    `<svg class="seal ${kind}" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="1.6 2.95" opacity="0.55"/><circle cx="32" cy="32" r="23" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="2"/><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${SEAL_GLYPH[kind]}</g></svg>`,
+  );
+}
+
+/**
+ * The verdict at the top of a proof: seal, a one-line title and what it means. `extra` goes under
+ * the text, inside the same panel (e.g. the lock's epoch track).
+ */
+export function verdictPanel(kind: Verdict, title: string, text: Child, extra?: Child): HTMLElement {
+  return h(
+    "section",
+    { class: `verdict ${kind}`, role: kind === "bad" ? "alert" : undefined },
+    h("div", { class: "verdict-head" }, seal(kind), h("div", {}, h("p", { class: "verdict-title" }, title), h("p", { class: "verdict-text" }, text))),
+    extra,
+  );
+}
+
+/** A page that couldn't load: what failed, why, and the way back to the lookup. */
+export function loadError(net: NetConfig, title: string, e: unknown): HTMLElement {
+  return h("div", {}, verdictPanel("bad", title, errorText(e)), h("p", {}, link(net, "", "Check another address", "button ghost")));
+}
+
+/** The numbered steps beside a wallet flow's intro, so the page says what will happen. */
+export function flowSteps(...steps: string[]): HTMLElement {
+  return h("ol", { class: "flow-steps", "aria-label": "What happens" }, ...steps.map((s) => h("li", {}, s)));
+}
+
 export function loading(text = "Loading…"): HTMLElement {
-  return h("p", { class: "muted", "aria-live": "polite" }, text);
+  return h("p", { class: "muted loading", "aria-live": "polite" }, text);
 }
 
 export function errorText(e: unknown): string {

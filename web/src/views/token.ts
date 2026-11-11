@@ -2,7 +2,7 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, getSubstate, indexerHost, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, verdict, type LoadedLock } from "../lockdata";
-import { addressLine, errorText, h, link, loading, notice, pill } from "../ui";
+import { addressLine, h, link, loadError, loading, notice, pill, verdictPanel } from "../ui";
 import { formatAmount, lockedShare, readResource } from "../verify";
 import { checkList } from "./lock";
 
@@ -23,7 +23,7 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
     const title = r.name ?? r.symbol ?? "Token";
     root.append(
       h("h1", {}, title, r.symbol && r.name ? h("span", { class: "muted" }, ` (${r.symbol})`) : null),
-      h("p", {}, addressLine(id)),
+      h("p", { class: "title-sub" }, addressLine(id)),
       h(
         "div",
         {},
@@ -33,7 +33,7 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
       ),
       h(
         "dl",
-        { class: "facts" },
+        { class: "stats" },
         h("dt", {}, "Type"),
         h("dd", {}, r.type),
         h("dt", {}, "Supply"),
@@ -43,15 +43,15 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
       ),
       h("h2", {}, "Can the issuer undo a lock?"),
       r.lockRisks.length === 0
-        ? notice("ok", "No. This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.")
-        : notice("bad", "Yes. Locks of this token are never marked verified."),
+        ? verdictPanel("ok", "No", "This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.")
+        : verdictPanel("bad", "Yes", "Locks of this token are never marked verified."),
       checkList([
         ...r.lockRisks.map((x) => ({ ok: false, label: x })),
         ...r.notes.map((n) => ({ ok: true, label: n, detail: "Doesn't affect locks." })),
       ]),
     );
 
-    const section = h("section", {}, h("h2", {}, "Locks of this token"), loading("Looking for locks…"));
+    const section = h("section", { class: "recent" }, h("h2", {}, "Locks of this token"), loading("Looking for locks…"));
     root.append(section);
     const found = await lockCreatedEvents(net, MAX_EVENT_PAGES);
     const mine = found.events.filter((e) => e.resource === id);
@@ -71,7 +71,7 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
     if (gaps.length) section.append(notice("warn", `${gaps.join(" ")} The locked total is at least the amount shown.`));
     section.append(h("p", { class: "muted small" }, `Read from ${indexerHost(net)} at epoch ${epoch}.`));
   } catch (e) {
-    root.lastElementChild?.replaceWith(notice("bad", `Could not load this token: ${errorText(e)}`));
+    root.lastElementChild?.replaceWith(loadError(net, "Could not load this token", e));
   }
 }
 
@@ -90,12 +90,12 @@ export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | nul
     return h(
       "tr",
       {},
-      h("td", {}, link(net, `lock/${l.id}`, h("code", { title: l.id }, l.id.slice(10, 22)))),
-      h("td", { class: "num" }, l.vault?.amount != null ? `${formatAmount(l.vault.amount, d)} ${l.resource?.symbol ?? ""}`.trim() : "—"),
-      h("td", {}, s ? `epoch ${s.unlockEpoch}${s.unlockEpoch > BigInt(epoch) ? ` (in ${s.unlockEpoch - BigInt(epoch)})` : ""}` : "—"),
+      h("td", { "data-label": "Lock" }, link(net, `lock/${l.id}`, h("code", { title: l.id }, l.id.slice(10, 22)))),
+      h("td", { class: "num", "data-label": "Holding" }, l.vault?.amount != null ? `${formatAmount(l.vault.amount, d)} ${l.resource?.symbol ?? ""}`.trim() : "—"),
+      h("td", { "data-label": "Unlocks" }, s ? `epoch ${s.unlockEpoch}${s.unlockEpoch > BigInt(epoch) ? ` (in ${s.unlockEpoch - BigInt(epoch)})` : ""}` : "—"),
       h(
         "td",
-        {},
+        { class: "pills", "data-label": "Status" },
         l.status === "locked" ? pill("Locked", "ok") : l.status === "claimable" ? pill("Unlocked", "warn") : l.status === "claimed" ? pill("Claimed", "neutral") : "—",
         " ",
         v === "verified" ? pill("Verified", "ok") : v === "unknown" ? pill("Unknown", "warn") : pill("Not verified", "bad"),
@@ -108,7 +108,7 @@ export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | nul
     div !== null
       ? h(
           "p",
-          {},
+          { class: "locked-total" },
           complete ? "" : "At least ",
           h("strong", {}, `${formatAmount(lockedNow, div)} ${locks.find((l) => l.resource?.symbol)?.resource?.symbol ?? ""}`.trim()),
           " still locked",
@@ -121,7 +121,7 @@ export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | nul
       { class: "table-wrap" },
       h(
         "table",
-        {},
+        { class: "stack" },
         h("thead", {}, h("tr", {}, h("th", {}, "Lock"), h("th", { class: "num" }, "Holding"), h("th", {}, "Unlocks"), h("th", {}, "Status"))),
         h("tbody", {}, ...rows),
       ),

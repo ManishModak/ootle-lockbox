@@ -7,7 +7,7 @@ import type { NetConfig } from "../config";
 import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { isThisLaunch, LAUNCH_DECIMALS, launchProblem, MAX_LAUNCH_LOCKS, type LaunchInput, type LaunchLockInput } from "../newlaunch";
 import { MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, estimatedDate, formatDate, h, link, notice, onThisPage } from "../ui";
+import { errorText, estimatedDate, flowSteps, formatDate, h, link, notice, onThisPage } from "../ui";
 import { loadLaunch } from "../lockdata";
 import { formatAmount, parseAmount } from "../verify";
 import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, txHash, walletKey, requireWalletNetwork } from "../wallet";
@@ -26,7 +26,7 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
   const btn = h("button", { type: "button" }, "Connect Sapient wallet");
   const intro = h(
     "section",
-    { class: "card" },
+    { class: "card intro" },
     h(
       "p",
       {},
@@ -36,7 +36,19 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
     status,
     h("p", { class: "muted small" }, "No wallet? Launch from a terminal with launch-cli (", h("a", { href: CLI_URL }, "source"), ")."),
   );
-  root.append(intro);
+  root.append(
+    h(
+      "div",
+      { class: "flow" },
+      intro,
+      flowSteps(
+        "Connect your Sapient wallet.",
+        "Name the token and set its supply.",
+        "Add the allocations to lock.",
+        "Review every key and amount, then sign. A dry run checks it first.",
+      ),
+    ),
+  );
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
     status.textContent = "Connecting…";
@@ -210,7 +222,7 @@ function reviewBox(
       { class: "table-wrap" },
       h(
         "table",
-        {},
+        { class: "stack" },
         h("thead", {}, h("tr", {}, h("th", { class: "num" }, "Amount"), h("th", {}, "Unlocks"), h("th", {}, "Beneficiary (full key)"))),
         h(
           "tbody",
@@ -219,9 +231,9 @@ function reviewBox(
             h(
               "tr",
               {},
-              h("td", { class: "num" }, `${formatAmount(l.amount, LAUNCH_DECIMALS)} ${sym}`),
-              h("td", {}, `epoch ${l.unlockEpoch}, most likely around ${estimatedDate(net, Number(l.unlockEpoch), epoch)}; after ${formatDate(targets[i])} unless epochs run shorter than ${net.epochMinutes.min} minutes`),
-              h("td", {}, h("code", { class: "wrap" }, l.beneficiary), l.beneficiary === myKey ? " (you)" : ""),
+              h("td", { class: "num", "data-label": "Amount" }, `${formatAmount(l.amount, LAUNCH_DECIMALS)} ${sym}`),
+              h("td", { "data-label": "Unlocks" }, `epoch ${l.unlockEpoch}, most likely around ${estimatedDate(net, Number(l.unlockEpoch), epoch)}; after ${formatDate(targets[i])} unless epochs run shorter than ${net.epochMinutes.min} minutes`),
+              h("td", { "data-label": "Beneficiary" }, h("code", { class: "wrap" }, l.beneficiary), l.beneficiary === myKey ? " (you)" : ""),
             ),
           ),
         ),

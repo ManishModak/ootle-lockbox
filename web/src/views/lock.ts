@@ -2,7 +2,7 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
-import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, onThisPage, pill } from "../ui";
+import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loadError, loading, notice, onThisPage, pill, verdictPanel } from "../ui";
 import { formatAmount, type Check } from "../verify";
 import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, requireWalletNetwork } from "../wallet";
 
@@ -17,7 +17,7 @@ export async function lockView(net: NetConfig, id: string, root: HTMLElement) {
     epoch = await currentEpoch(net);
     l = await loadLock(net, id, epoch);
   } catch (e) {
-    root.lastElementChild?.replaceWith(notice("bad", `Could not load this lock: ${errorText(e)}`));
+    root.lastElementChild?.replaceWith(loadError(net, "Could not load this lock", e));
     return;
   }
   root.lastElementChild?.remove();
@@ -31,17 +31,26 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
   const sym = r?.symbol ?? "tokens";
   const page = h("article", { class: "proof" });
 
+  const track = s ? epochTrack(s.lockedAtEpoch, s.unlockEpoch, epoch) : null;
   const banner =
     v === "verified"
       ? l.status === "claimed"
-        ? notice("ok", h("strong", {}, "Verified lock, now claimed. "), "It held its tokens until the unlock epoch, and the beneficiary has claimed them.")
+        ? verdictPanel("ok", "Verified lock, now claimed", "It held its tokens until the unlock epoch, and the beneficiary has claimed them.", track)
         : l.status === "claimable"
-          ? notice("ok", h("strong", {}, "Verified lock, now unlocked. "), "The unlock epoch has passed; only the beneficiary can claim the tokens.")
-          : notice("ok", h("strong", {}, "Verified lock. "), "Nobody can move these tokens before the unlock epoch, and the token's issuer cannot undo it.")
+          ? verdictPanel("ok", "Verified lock, now unlocked", "The unlock epoch has passed; only the beneficiary can claim the tokens.", track)
+          : verdictPanel("ok", "Verified lock", "Nobody can move these tokens before the unlock epoch, and the token's issuer cannot undo it.", track)
       : v === "unknown"
-        ? notice("warn", h("strong", {}, "Unable to verify. "), "Some data could not be read; treat this lock as unverified.")
-        : notice("bad", h("strong", {}, "Not verified. "), "See the failed checks below.");
-  page.append(h("h1", {}, "Lock ", h("code", { class: "title-addr", title: l.id }, l.id.slice(10, 22))), banner);
+        ? verdictPanel("warn", "Unable to verify", "Some data could not be read; treat this lock as unverified.", track)
+        : verdictPanel("bad", "Not verified", "See the failed checks below.", track);
+  page.append(
+    h(
+      "div",
+      { class: "title-row" },
+      h("h1", {}, "Lock ", h("code", { class: "title-addr", title: l.id }, l.id.slice(10, 22))),
+      copyButton(location.href, "Copy link to this proof"),
+    ),
+    banner,
+  );
 
   if (s) {
     const statusPill =
@@ -52,7 +61,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
     page.append(
       h(
         "dl",
-        { class: "facts" },
+        { class: "facts panel" },
         h("dt", {}, "Status"),
         h("dd", {}, statusPill),
         h("dt", {}, "Holding now"),
@@ -100,7 +109,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
         ...r.notes.map((n) => ({ ok: true, label: n, detail: "Doesn't affect the lock." })),
       ]
     : [{ ok: false, label: "Token rules are readable" }];
-  page.append(h("h2", {}, "Checks"), checkList([...l.reading.checks, ...tokenChecks]));
+  page.append(checksSection([...l.reading.checks, ...tokenChecks]));
 
   page.append(
     h(
@@ -110,7 +119,6 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
       l.indexerVerified ? "The indexer marked every substate it returned as verified. " : "The indexer did not mark every substate as verified. ",
       "This page trusts that indexer; anyone can re-check with their own.",
     ),
-    h("div", { class: "row" }, copyButton(location.href, "Copy link to this proof")),
   );
 
   // Claiming signs a call to this component, so only offer it for a genuine Lockbox.
@@ -128,8 +136,43 @@ export function checkList(checks: Check[]): HTMLElement {
         { class: c.ok ? "ok" : "bad" },
         h("span", { class: "mark", "aria-hidden": "true" }, c.ok ? "✓" : "✕"),
         h("span", { class: "sr" }, c.ok ? "Passed: " : "Failed: "),
-        h("span", {}, c.label, c.detail ? h("span", { class: "muted" }, ` — ${c.detail}`) : null),
+        h("span", { class: "check-text" }, c.label, c.detail ? h("span", { class: "check-detail" }, c.detail) : null),
       ),
+    ),
+  );
+}
+
+/** "Checks" with how many passed, then the list, as one panel on a proof page. */
+export function checksSection(checks: Check[]): HTMLElement {
+  const passed = checks.filter((c) => c.ok).length;
+  return h(
+    "section",
+    { class: "panel checks-panel" },
+    h("div", { class: "checks-head" }, h("h2", {}, "Checks"), h("span", { class: passed === checks.length ? "count ok" : "count bad" }, `${passed} of ${checks.length} passed`)),
+    checkList(checks),
+  );
+}
+
+/**
+ * The lock's span from its lock epoch to its unlock epoch, with where the chain is now. Visual
+ * only (the same epochs are listed in the facts), so it is hidden from screen readers.
+ */
+function epochTrack(lockedAt: bigint, unlockAt: bigint, now: number): HTMLElement {
+  const span = unlockAt - lockedAt;
+  const done = BigInt(now) - lockedAt;
+  // Basis points, so huge u64 epochs never lose precision through Number.
+  const bp = span <= 0n || done >= span ? 10000 : done <= 0n ? 0 : Number((done * 10000n) / span);
+  const pct = `${bp / 100}%`;
+  return h(
+    "div",
+    { class: "track", "aria-hidden": "true" },
+    h("div", { class: "track-bar" }, h("div", { class: "track-fill", style: `width: ${pct}` }), h("div", { class: "track-now", style: `left: ${pct}` })),
+    h(
+      "div",
+      { class: "track-labels" },
+      h("span", {}, "Locked at ", h("strong", {}, `epoch ${lockedAt}`)),
+      h("span", { class: "track-now-label" }, "Now ", h("strong", {}, `epoch ${now}`)),
+      h("span", {}, "Unlocks at ", h("strong", {}, `epoch ${unlockAt}`)),
     ),
   );
 }
@@ -163,7 +206,7 @@ export function setFormBusy(form: HTMLElement, busy: boolean) {
 function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
   const status = h("p", { class: "muted", "aria-live": "polite" });
   const btn = h("button", { type: "button" }, "Connect wallet to claim");
-  const box = h("section", { class: "card" }, h("h2", {}, "Claim"), h("p", {}, "Only the beneficiary's wallet can claim. The tokens go to the account you connect."), btn, status);
+  const box = h("section", { class: "card claim" }, h("h2", {}, "Claim"), h("p", {}, "Only the beneficiary's wallet can claim. The tokens go to the account you connect."), btn, status);
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
     const here = onThisPage();

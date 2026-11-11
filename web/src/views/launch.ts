@@ -6,9 +6,9 @@ import type { NetConfig } from "../config";
 import { currentEpoch, indexerHost } from "../indexer";
 import type { Fact } from "../launch";
 import { loadLaunch, verdict, type LoadedLaunch } from "../lockdata";
-import { addressLine, errorText, h, link, loading, notice, pill } from "../ui";
+import { addressLine, h, link, loadError, loading, notice, pill, verdictPanel } from "../ui";
 import { formatAmount } from "../verify";
-import { checkList } from "./lock";
+import { checksSection } from "./lock";
 
 export async function launchView(net: NetConfig, id: string, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / launch"));
@@ -23,7 +23,7 @@ export async function launchView(net: NetConfig, id: string, root: HTMLElement) 
     epoch = await currentEpoch(net);
     l = await loadLaunch(net, id, epoch);
   } catch (e) {
-    root.lastElementChild?.replaceWith(notice("bad", `Could not load this token: ${errorText(e)}`));
+    root.lastElementChild?.replaceWith(loadError(net, "Could not load this token", e));
     return;
   }
   root.lastElementChild?.remove();
@@ -41,7 +41,7 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
   if (!t) return notice("bad", "This address is not a token (resource) on this network.");
   const page = h("article", { class: "proof" });
   const title = t.name ?? t.symbol ?? "Token";
-  page.append(h("h1", {}, title, t.symbol && t.name ? h("span", { class: "muted" }, ` (${t.symbol})`) : null), h("p", {}, addressLine(id)));
+  page.append(h("h1", {}, title, t.symbol && t.name ? h("span", { class: "muted" }, ` (${t.symbol})`) : null), h("p", { class: "title-sub" }, addressLine(id)));
 
   const p = l.proof;
   if (!p) {
@@ -53,19 +53,19 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
 
   page.append(
     p.issued === "yes"
-      ? notice("ok", h("strong", {}, "Issued by Launch Commitments. "), "Each fact below was checked on chain just now.")
+      ? verdictPanel("ok", "Issued by Launch Commitments", "Each fact below was checked on chain just now.")
       : p.issued === "no"
-        ? notice("bad", h("strong", {}, "Not a genuine Launch Commitments token. "), "See the failed checks below.")
-        : notice("warn", h("strong", {}, "Unable to verify. "), "Some data could not be read; treat this token as unverified."),
+        ? verdictPanel("bad", "Not a genuine Launch Commitments token", "See the failed checks below.")
+        : verdictPanel("warn", "Unable to verify", "Some data could not be read; treat this token as unverified."),
   );
 
-  const fact = (label: string, f: Fact, meaning: string) => [h("dt", {}, label), h("dd", {}, pill(...FACT_PILL[f]), h("span", { class: "muted" }, ` ${meaning}`))];
+  const fact = (label: string, f: Fact, meaning: string) => [h("dt", {}, label), h("dd", { class: "fact" }, pill(...FACT_PILL[f]), h("span", { class: "muted" }, ` ${meaning}`))];
   const div = t.divisibility;
   const sym = t.symbol ?? "tokens";
   page.append(
     h(
       "dl",
-      { class: "facts" },
+      { class: "facts panel" },
       ...fact("Fixed supply", p.fixedSupply, "Nobody can mint or burn it."),
       ...fact("Rules frozen", p.rulesFrozen, "No owner, every rule and updater locked, no transfer hook."),
       ...fact("Issued by Launch Commitments", p.issued, "Its launch record and the token name each other."),
@@ -99,13 +99,13 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
       return h(
         "tr",
         {},
-        h("td", {}, link(net, `lock/${want.lock}`, h("code", { title: want.lock }, want.lock.slice(10, 22)))),
-        h("td", { class: "num" }, `${formatAmount(want.amount, div)} ${sym}`),
-        h("td", {}, `epoch ${want.unlockEpoch}${want.unlockEpoch > BigInt(epoch) ? ` (in ${want.unlockEpoch - BigInt(epoch)})` : ""}`),
-        h("td", {}, h("code", { title: want.beneficiary }, `${want.beneficiary.slice(0, 8)}…`)),
+        h("td", { "data-label": "Lock" }, link(net, `lock/${want.lock}`, h("code", { title: want.lock }, want.lock.slice(10, 22)))),
+        h("td", { class: "num", "data-label": "Amount" }, `${formatAmount(want.amount, div)} ${sym}`),
+        h("td", { "data-label": "Unlocks" }, `epoch ${want.unlockEpoch}${want.unlockEpoch > BigInt(epoch) ? ` (in ${want.unlockEpoch - BigInt(epoch)})` : ""}`),
+        h("td", { "data-label": "Beneficiary" }, h("code", { title: want.beneficiary }, `${want.beneficiary.slice(0, 8)}…`)),
         h(
           "td",
-          {},
+          { class: "pills", "data-label": "Status" },
           status === "locked" ? pill("Locked", "ok") : status === "claimable" ? pill("Unlocked", "warn") : status === "claimed" ? pill("Claimed", "neutral") : "—",
           " ",
           v === "verified" ? pill("Verified", "ok") : v === "unknown" ? pill("Unknown", "warn") : pill("Not verified", "bad"),
@@ -120,7 +120,7 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
         { class: "table-wrap" },
         h(
           "table",
-          {},
+          { class: "stack" },
           h("thead", {}, h("tr", {}, h("th", {}, "Lock"), h("th", { class: "num" }, "Amount"), h("th", {}, "Unlocks"), h("th", {}, "Beneficiary"), h("th", {}, "Status"))),
           h("tbody", {}, ...rows),
         ),
@@ -129,8 +129,7 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
   }
 
   page.append(
-    h("h2", {}, "Checks"),
-    checkList(p.checks),
+    checksSection(p.checks),
     h(
       "p",
       { class: "muted small" },

@@ -5,7 +5,7 @@
 import { MAX_MEMO_BYTES, REPO_URL, type NetConfig } from "../config";
 import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { lockableAmount, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, epochsAsDuration, estimatedDate, formatDate, h, link, notice, onThisPage } from "../ui";
+import { errorText, epochsAsDuration, estimatedDate, flowSteps, formatDate, h, link, notice, onThisPage } from "../ui";
 import { formatAmount, parseAmount, readResource } from "../verify";
 import { balances, connect, dryRun, getProvider, lockInstructions, settleEarlier, submit, txHash, walletKey, requireWalletNetwork, type Balance } from "../wallet";
 import { checkList, setFormBusy, showTxError } from "./lock";
@@ -21,13 +21,25 @@ export async function createView(net: NetConfig, root: HTMLElement) {
   const btn = h("button", { type: "button" }, "Connect Sapient wallet");
   const intro = h(
     "section",
-    { class: "card" },
+    { class: "card intro" },
     h("p", {}, `You need the Sapient wallet extension on ${net.label}, holding the tokens you want to lock as a public balance.`),
     btn,
     status,
     h("p", { class: "muted small" }, "No wallet? Lock from a terminal with ", h("a", { href: REPO_URL }, "lockbox-cli"), "."),
   );
-  root.append(intro);
+  root.append(
+    h(
+      "div",
+      { class: "flow" },
+      intro,
+      flowSteps(
+        "Connect your Sapient wallet.",
+        "Pick a token, amount, unlock time and beneficiary.",
+        "Review the token's rules and the lock's terms.",
+        "Sign. A dry run checks it first.",
+      ),
+    ),
+  );
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
     status.textContent = "Connecting…";

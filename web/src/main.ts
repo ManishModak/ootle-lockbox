@@ -4,7 +4,7 @@
  */
 import "./style.css";
 import { DEFAULT_NETWORK, NETWORKS, REPO_URL, type NetConfig, type NetworkName } from "./config";
-import { h, startPage } from "./ui";
+import { h, logo, startPage } from "./ui";
 import { createView } from "./views/create";
 import { homeView } from "./views/home";
 import { launchView } from "./views/launch";
@@ -32,11 +32,19 @@ function header(net: NetConfig): HTMLElement {
     ...Object.values(NETWORKS).map((c) => h("option", { value: c.name, selected: c.name === net.name }, c.label)),
   ) as HTMLSelectElement;
   select.addEventListener("change", () => (location.hash = `#/${select.value}`));
+  const here = parseRoute().page;
+  const navLink = (page: string, text: string) =>
+    h("a", { href: `#/${net.name}/${page}`, "aria-current": here === page ? "page" : undefined }, text);
   return h(
     "header",
     { class: "top" },
-    h("a", { href: `#/${net.name}`, class: "brand" }, h("span", { class: "logo", "aria-hidden": "true" }), "Lockbox"),
-    h("nav", {}, h("a", { href: `#/${net.name}/create` }, "Create"), select),
+    h(
+      "div",
+      { class: "top-inner" },
+      h("a", { href: `#/${net.name}`, class: "brand" }, logo(), "Lockbox"),
+      h("nav", { "aria-label": "Main" }, navLink("create", "Create a lock"), navLink("launch", "Launch a token")),
+      h("span", { class: `net net-${net.name}` }, h("span", { class: "net-dot", "aria-hidden": "true" }), select),
+    ),
   );
 }
 
