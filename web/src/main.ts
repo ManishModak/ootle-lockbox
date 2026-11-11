@@ -51,7 +51,7 @@ function footer(): HTMLElement {
       h("a", { href: REPO_URL }, "GitHub"),
       " · Built on ",
       h("a", { href: "https://ootle.tari.com" }, "Tari Ootle"),
-      ". Lockbox is software, not an offer of any token; it holds nothing for anyone and charges no fee.",
+      ". Lockbox is software, not an offer of any token, and holds nothing for anyone. Locks carry no Lockbox fee; launching a token charges a flat launch fee, shown before you sign.",
     ),
   );
 }

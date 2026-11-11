@@ -4,7 +4,7 @@ import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
 import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loading, notice, onThisPage, pill } from "../ui";
 import { formatAmount, type Check } from "../verify";
-import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, walletNetwork } from "../wallet";
+import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, requireWalletNetwork } from "../wallet";
 
 /** Past this many epochs ahead (centuries at any epoch length) no date is estimated. */
 const MAX_DATED_EPOCHS = 10_000_000n;
@@ -170,8 +170,7 @@ function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
     try {
       const p = await getProvider();
       if (!p) throw new Error("Sapient wallet not found. Install it, or claim with lockbox-cli.");
-      const wn = await walletNetwork(p);
-      if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}; this lock is on ${net.label}.`);
+      await requireWalletNetwork(p, net);
       const account = await connect(p);
       await settleEarlier(p, net, (t) => (status.textContent = t));
       if ((await walletKey(p, net)) !== l.reading.state!.beneficiary) {

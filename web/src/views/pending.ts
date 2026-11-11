@@ -5,7 +5,7 @@
  */
 import type { NetConfig } from "../config";
 import { h, notice } from "../ui";
-import { connect, getProvider, hasSavedRequest, settleEarlier, walletNetwork } from "../wallet";
+import { connect, getProvider, hasSavedRequest, settleEarlier, requireWalletNetwork } from "../wallet";
 import { showTxError } from "./lock";
 
 export function pendingBanner(net: NetConfig): HTMLElement | null {
@@ -17,8 +17,7 @@ export function pendingBanner(net: NetConfig): HTMLElement | null {
     try {
       const p = await getProvider();
       if (!p) throw new Error("Sapient wallet not found in this browser.");
-      const wn = await walletNetwork(p);
-      if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}. Switch it to ${net.label}.`);
+      await requireWalletNetwork(p, net);
       await connect(p);
       const settled = await settleEarlier(p, net, (t) => (status.textContent = t));
       status.textContent =

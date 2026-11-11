@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./config";
-import { dryRun, engineVerdict, forgetEarlierTransaction, settleEarlier, submit, TxBlocked, txHash } from "./wallet";
+import { dryRun, engineVerdict, forgetEarlierTransaction, requireWalletNetwork, settleEarlier, submit, TxBlocked, txHash } from "./wallet";
 
 const net = NETWORKS.esmeralda;
 const HASH = "c9".repeat(32);
@@ -263,5 +263,26 @@ describe("submit", () => {
     await forgetEarlierTransaction(net, "req1");
     expect(await run(w)).toEqual({ ok: accept });
     expect(w.creates()).toBe(2);
+  });
+});
+
+describe("requireWalletNetwork", () => {
+  const wallet = (answer: () => unknown) => ({ isTariWallet: true, request: async () => answer() }) as any;
+
+  it("passes when the wallet is on the page's network", async () => {
+    await expect(requireWalletNetwork(wallet(() => "mainnet"), NETWORKS.mainnet)).resolves.toBeUndefined();
+  });
+
+  it("asks the user to switch when the wallet is on another network", async () => {
+    await expect(requireWalletNetwork(wallet(() => "esmeralda"), NETWORKS.mainnet)).rejects.toThrow(
+      /on esmeralda; this page is for .*Switch your wallet to/,
+    );
+  });
+
+  it("passes the wallet's own error through", async () => {
+    const failing = wallet(() => {
+      throw new Error("No wallet set up");
+    });
+    await expect(requireWalletNetwork(failing, NETWORKS.esmeralda)).rejects.toThrow("No wallet set up");
   });
 });

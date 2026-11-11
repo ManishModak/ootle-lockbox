@@ -54,8 +54,11 @@ export async function connect(p: TariProvider): Promise<string> {
   return account;
 }
 
-export async function walletNetwork(p: TariProvider): Promise<string> {
-  return String(await p.request({ method: "tari_getNetwork" }));
+/** Throws a user-facing error unless the wallet is on `net`; used before every signing flow. */
+export async function requireWalletNetwork(p: TariProvider, net: NetConfig): Promise<void> {
+  const wn = String(await p.request({ method: "tari_getNetwork" }));
+  if (wn === net.walletNetwork) return;
+  throw new Error(`Your wallet is on ${wn}; this page is for ${net.label}. Switch your wallet to ${net.label} and try again.`);
 }
 
 /**

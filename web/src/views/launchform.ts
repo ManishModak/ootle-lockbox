@@ -10,10 +10,10 @@ import { MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } 
 import { errorText, estimatedDate, formatDate, h, link, notice, onThisPage } from "../ui";
 import { loadLaunch } from "../lockdata";
 import { formatAmount, parseAmount } from "../verify";
-import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, txHash, walletKey, walletNetwork } from "../wallet";
+import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, txHash, walletKey, requireWalletNetwork } from "../wallet";
 import { setFormBusy, showTxError } from "./lock";
 
-const CLI_URL = "https://github.com/ManishModak/ootle-lockbox"; // TODO: the Launch Commitments repo once public
+const CLI_URL = "https://github.com/ManishModak/ootle-launch-commitments";
 
 export async function launchFormView(net: NetConfig, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / launch"), h("h1", {}, "Launch a token"));
@@ -43,8 +43,7 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
     try {
       const p = await getProvider();
       if (!p) throw new Error("Sapient wallet not found in this browser.");
-      const wn = await walletNetwork(p);
-      if (wn !== net.walletNetwork) throw new Error(`Your wallet is on ${wn}. Switch it to ${net.label}, or open this page for ${wn}.`);
+      await requireWalletNetwork(p, net);
       const account = await connect(p);
       // An earlier launch whose outcome is unknown is settled first, even if its fee left too little for a new one.
       await settleEarlier(p, net, (t) => (status.textContent = t));
