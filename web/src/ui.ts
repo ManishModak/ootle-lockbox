@@ -3,7 +3,7 @@
  * HTML, so token names and memos can't inject markup.
  */
 import { NETWORKS, type NetConfig } from "./config";
-import { IndexerError } from "./indexer";
+import { loadFailure } from "./proofcopy";
 import type { LockStatus } from "./verify";
 
 type Child = Node | string | number | null | undefined | false;
@@ -177,28 +177,41 @@ export function proofTitle(title: HTMLElement): HTMLElement {
 }
 
 /**
- * A page that couldn't load, as a neutral panel (it is not a verdict on anything): nothing at that
- * address on this network, with a link to the same address on the other one; or the indexer
- * couldn't be reached, with Retry. `path` is the page's route without the network, e.g. `lock/<id>`.
+ * A page that couldn't load, as a neutral panel (it is not a verdict on anything): nothing at the
+ * requested address on this network, with a link to the same address on the other one; part of
+ * what the proof needs missing (a vault, a launch record), or the indexer unreachable, with Retry.
+ * `path` is the page's route without the network, e.g. `lock/<id>`.
  */
 export function loadError(net: NetConfig, what: string, id: string, path: string, e: unknown): HTMLElement {
   const other = Object.values(NETWORKS).find((n) => n.name !== net.name);
-  const kind = e instanceof IndexerError ? e.kind : "bad-data";
+  const kind = loadFailure(e, id);
   const retry = h("button", { type: "button", class: "ghost" }, "Retry");
   retry.addEventListener("click", () => window.dispatchEvent(new HashChangeEvent("hashchange")));
   const back = link(net, "", "Check another address", "button ghost");
   const body =
-    kind === "not-found"
+    kind === "absent"
       ? [
           h("h1", {}, `No ${what} at `, h("code", { title: id }, short(id)), ` on ${net.label}.`),
           h("p", { class: "muted" }, "Check the address, or the network it was made on."),
           h("div", { class: "row" }, other ? h("a", { href: `#/${other.name}/${path}`, class: "button" }, `Look on ${other.label}`) : null, back),
         ]
-      : [
-          h("h1", {}, kind === "unreachable" ? "Couldn't reach the indexer" : `Couldn't load this ${what}`),
-          h("p", { class: "muted" }, errorText(e)),
-          h("div", { class: "row" }, retry, back),
-        ];
+      : kind === "incomplete"
+        ? [
+            h("h1", {}, `Couldn't read the complete proof on ${net.label}`),
+            h(
+              "p",
+              { class: "muted" },
+              `Something the proof of ${what} `,
+              h("code", { title: id }, short(id)),
+              " depends on wasn't found, so no verdict is shown. The indexer may be behind; try again in a minute.",
+            ),
+            h("div", { class: "row" }, retry, back),
+          ]
+        : [
+            h("h1", {}, kind === "unreachable" ? "Couldn't reach the indexer" : `Couldn't load this ${what}`),
+            h("p", { class: "muted" }, errorText(e)),
+            h("div", { class: "row" }, retry, back),
+          ];
   return h("section", { class: "panel load-error" }, ...body);
 }
 

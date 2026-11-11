@@ -53,7 +53,16 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
       )
     : null;
   const note = notesLine(notes, "the lock");
-  const lines = [summary, note ? h("p", { class: "verdict-note" }, note) : null];
+  // Claiming signs a call to this component, so only offer it for a genuine Lockbox. A verified
+  // lock's claim comes right after its facts, with a shortcut to it in the verdict; otherwise the
+  // claim comes only after the checks have been read.
+  const claim = s && l.status === "claimable" && l.reading.genuine ? claimBox(net, l) : null;
+  const goToClaim = () => {
+    claim?.scrollIntoView({ behavior: "smooth", block: "center" });
+    claim?.querySelector("button")?.focus({ preventScroll: true });
+  };
+  const toClaim = claim && v === "verified" ? h("p", { class: "verdict-action" }, h("button", { type: "button", class: "small", onclick: goToClaim }, "Claim tokens")) : null;
+  const lines = [summary, note ? h("p", { class: "verdict-note" }, note) : null, toClaim];
   const track = s ? epochTrack(s.lockedAtEpoch, s.unlockEpoch, epoch) : null;
   const banner =
     v === "verified"
@@ -105,7 +114,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
             left > MAX_DATED_EPOCHS
               ? ` · in ${left} epochs (centuries away)`
               : left > 0n
-                ? ` · in ${left} epochs (${epochsAsDuration(net, Number(left))}, around ${estimatedDate(net, Number(s.unlockEpoch), epoch)})`
+                ? ` · in ${left} epochs (${epochsAsDuration(net, Number(left))})`
                 : ` · reached ${-left} epochs ago`,
           ),
         ),
@@ -119,9 +128,6 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
     );
   }
 
-  // Claiming signs a call to this component, so only offer it for a genuine Lockbox. A verified
-  // lock's claim comes right after its facts; otherwise only after the checks have been read.
-  const claim = s && l.status === "claimable" && l.reading.genuine ? claimBox(net, l) : null;
   if (claim && v === "verified") page.append(claim);
   page.append(checksSection(checks, notes, "Doesn't affect the lock."));
   page.append(
@@ -247,7 +253,7 @@ export function setFormBusy(form: HTMLElement, busy: boolean) {
 function claimBox(net: NetConfig, l: LoadedLock): HTMLElement {
   const status = h("p", { class: "muted", "aria-live": "polite" });
   const btn = h("button", { type: "button" }, "Connect wallet to claim");
-  const box = h("section", { class: "card claim" }, h("h2", {}, "Claim"), h("p", {}, "Only the beneficiary's wallet can claim. The tokens go to the account you connect."), btn, status);
+  const box = h("section", { class: "card claim", id: "claim" }, h("h2", {}, "Claim"), h("p", {}, "Only the beneficiary's wallet can claim. The tokens go to the account you connect."), btn, status);
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
     const here = onThisPage();

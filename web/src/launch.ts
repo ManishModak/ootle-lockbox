@@ -6,7 +6,7 @@
  * Each fact is reported separately and nothing is called "safe":
  * - fixed supply: nobody can mint or burn;
  * - rules frozen: no owner, every rule and updater locked, no transfer hook;
- * - issued by Launch Commitments: a genuine record and the token name each other;
+ * - issued by Launch Commitments: a genuine record names the token, and the token names the record;
  * - locked at launch: each lock the record lists is a genuine Lockbox lock this launch made, with
  *   the recorded terms (creator-declared; it says nothing about who holds the rest).
  * What is *still* locked is a separate live number (`stillLocked`): locks open at their epoch and
@@ -228,7 +228,7 @@ export function launchProof(input: LaunchInputs, launchTemplate: string, current
     },
     {
       ok: record === null || r === null ? null : all(launchedBy, record.resource === input.resourceId),
-      label: "The record and the token name each other",
+      label: "The launch record names this token, and the token names the record",
     },
     { ok: record === null || supply === undefined || supply === null ? null : supply === record.supply, label: "The supply matches the record" },
   ];

@@ -134,10 +134,10 @@ ol.steps li::before { content: counter(step); display: block; font-weight: 800; 
 .eyebrow { margin: 18px 0 -6px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
 .crumb + .eyebrow { margin-top: 14px; }
 .crumb a { color: var(--muted); }
-.title-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
-.title-row h1 { margin-bottom: 12px; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 12px 0 10px; }
+.title-row h1 { margin: 0; }
 .title-addr { font-size: 0.62em; font-weight: 500; color: var(--muted); letter-spacing: 0; }
-.title-sub { margin: -6px 0 18px; }
+.title-sub { margin: 0 0 18px; }
 .addr { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* The verdict: the seal and its statement, the page's one loud element. */
@@ -148,6 +148,7 @@ ol.steps li::before { content: counter(step); display: block; font-weight: 800; 
 .verdict-title { color: var(--k); font-size: clamp(1.35rem, 1.1rem + 1vw, 1.75rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 4px; }
 .verdict-text { margin: 0; font-size: 1.03rem; }
 .verdict-summary { margin: 10px 0 0; font-size: 0.98rem; }
+.verdict-action { margin: 14px 0 0; }
 .verdict-summary code { font-size: 0.86em; }
 .verdict-note { display: flex; gap: 8px; align-items: baseline; margin: 8px 0 0; font-size: 0.92rem; color: var(--muted); }
 .verdict-note::before { content: "i"; flex: none; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 0.72rem; font-weight: 800; color: var(--text); background: var(--surface-2); transform: translateY(3px); }
@@ -270,6 +271,8 @@ input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; }
 .load-error h1 { margin: 0 0 6px; font-size: 1.3rem; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .load-error h1 code { font-size: 0.85em; }
 .load-error .row { margin-bottom: 0; }
+.inline-error { margin-top: 0; }
+.inline-error p { margin: 0 0 12px; }
 
 footer { max-width: none; border-top: 1px solid var(--line-soft); padding: 22px max(24px, calc((100% - var(--wide)) / 2 + 24px)) 40px; color: var(--muted); font-size: 0.85rem; }
 footer p { max-width: 60em; }
@@ -296,8 +299,12 @@ footer a:hover { color: var(--text); }
   ol.steps { grid-template-columns: 1fr; gap: 18px; }
   .panel, .card { padding: 18px; }
   .verdict { padding: 20px; }
-  .verdict-head { gap: 16px; align-items: flex-start; }
-  .seal { width: 56px; height: 56px; }
+  /* The seal sits beside the title only; the text under it gets the panel's full width. */
+  .verdict-head { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 4px 14px; align-items: center; }
+  .verdict-head .verdict-text { margin-top: 8px; }
+  .verdict-head > div { display: contents; }
+  .verdict-head > div > :not(.verdict-title) { grid-column: 1 / -1; }
+  .verdict-head .seal { width: 48px; height: 48px; }
   .track-now-row, .track-labels { font-size: 0.8rem; }
   .track-labels { flex-wrap: nowrap; }
   .track-labels strong { display: block; font-size: 0.9rem; }

@@ -63,7 +63,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
         h(
           "p",
           { class: "lede" },
-          "Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early unless the token's own rules allow it — every lock's public proof page checks. No Lockbox fee; network fees apply.",
+          "Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early — unless the token's own rules let its issuer. Each lock's proof page checks whether they do. No Lockbox fee; network fees apply.",
         ),
         ...actions,
       ),
@@ -97,8 +97,12 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
           {},
           "Creates a fixed-supply token that nobody, you included, can ever mint, burn, freeze or change, and locks the allocations you choose in Lockbox, in one transaction.",
         ),
+        net.launchTemplate ? null : h("p", { class: "muted small" }, `Launch Commitments isn't published on ${net.name === "mainnet" ? "mainnet" : net.label} yet.`),
       ),
-      link(net, "launch", "Launch a token", "button ghost"),
+      // Without the launch template here, the button goes to the testnet launch page instead of a dead end.
+      net.launchTemplate
+        ? link(net, "launch", "Launch a token", "button ghost")
+        : h("a", { href: `#/${TESTNET.name}/launch`, class: "button ghost" }, `Launch on ${TESTNET.label}`),
     ),
     h(
       "section",

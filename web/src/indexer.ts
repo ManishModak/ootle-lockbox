@@ -8,12 +8,14 @@ import type { NetConfig } from "./config";
 
 /**
  * A failed indexer read. `kind` lets pages word it: the indexer couldn't be reached (or answered
- * with an error), the address isn't there, or what came back couldn't be used.
+ * with an error), the address isn't there, or what came back couldn't be used. `id` is the
+ * substate that wasn't found, so a page can tell its own address missing from a dependency missing.
  */
 export class IndexerError extends Error {
   constructor(
     message: string,
     readonly kind: "unreachable" | "not-found" | "bad-data" = "bad-data",
+    readonly id?: string,
   ) {
     super(message);
   }
@@ -49,7 +51,13 @@ export interface Substate {
 }
 
 export async function getSubstate(net: NetConfig, id: string): Promise<Substate> {
-  const s = await getJson(`${net.indexer}/substates/${encodeURIComponent(id)}`);
+  let s: any;
+  try {
+    s = await getJson(`${net.indexer}/substates/${encodeURIComponent(id)}`);
+  } catch (e) {
+    if (e instanceof IndexerError && e.kind === "not-found") throw new IndexerError(e.message, "not-found", id);
+    throw e;
+  }
   const enc = s?.state?.up?.substate;
   if (typeof enc !== "string") throw new IndexerError("This substate has been removed or is not readable.");
   let value: unknown;

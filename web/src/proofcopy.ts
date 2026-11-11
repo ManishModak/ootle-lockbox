@@ -3,9 +3,69 @@
  * fact's explanation always follows that fact's result, and a token's notes (it can mint more, its
  * name can change) are shown apart from the checks and never counted as passed.
  */
+import { IndexerError } from "./indexer";
 import type { LaunchProof } from "./launch";
 import type { LoadedLock } from "./lockdata";
-import { formatAmount, type Check, type Fact } from "./verify";
+import { formatAmount, HOOK_UNREADABLE, type Check, type Fact, type ResourceReading } from "./verify";
+
+/**
+ * How a page that failed to load words it: "absent" only when the address the page asked for is
+ * missing; a missing dependency (the lock's vault, the launch record, the epoch) is "incomplete".
+ */
+export function loadFailure(e: unknown, id: string): "absent" | "incomplete" | "unreachable" | "bad-data" {
+  if (!(e instanceof IndexerError)) return "bad-data";
+  if (e.kind !== "not-found") return e.kind;
+  return e.id !== undefined && e.id.toLowerCase() === id.toLowerCase() ? "absent" : "incomplete";
+}
+
+/**
+ * The token page's verdict: "can undo" only for a real risk; a rule that couldn't be read gives
+ * "Not verified for Lockbox", with the reasons listed under `listTitle`.
+ */
+export function tokenVerdict(r: Pick<ResourceReading, "lockRisks">): { kind: "ok" | "warn" | "bad"; title: string; text: string; listTitle: string } {
+  if (r.lockRisks.length === 0) {
+    return {
+      kind: "ok",
+      title: "The issuer can't undo a lock",
+      text: "This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.",
+      listTitle: "",
+    };
+  }
+  if (r.lockRisks.some((x) => x !== HOOK_UNREADABLE)) {
+    return { kind: "bad", title: "The issuer can undo a lock", text: "Locks of this token are never marked verified.", listTitle: "What the issuer can still do" };
+  }
+  return {
+    kind: "warn",
+    title: "Not verified for Lockbox",
+    text: "Part of this token's rules could not be read, so locks of it are never marked verified.",
+    listTitle: "What couldn't be read",
+  };
+}
+
+/**
+ * The token page's still-locked line as [lead, bold, rest]. `found` locks were read, `open` of
+ * them unlocked or claimed; `complete` = every lock of the token was read. A zero total says why
+ * instead of showing "0.00%".
+ */
+export function lockedTotalLine(a: {
+  lockedNow: bigint;
+  amount: string;
+  share: string | null;
+  supplyTracked: boolean;
+  found: number;
+  open: number;
+  complete: boolean;
+}): [string, string, string] {
+  if (a.lockedNow > 0n) {
+    const share = a.share ? ` (${a.complete ? "" : "at least "}${a.share} of supply)` : a.supplyTracked ? "" : " (supply not tracked, so no share)";
+    return [a.complete ? "" : "At least ", a.amount, ` still locked in Lockbox${share}. Counts only genuine locks before their unlock epoch.`];
+  }
+  if (!a.complete) return ["", "Locked total unavailable", ": some locks of this token couldn't be read, and none of the others is still locked."];
+  const nothing = "Nothing is locked in Lockbox now";
+  if (a.found === 0) return ["", nothing, ": no locks of this token found."];
+  if (a.open === a.found) return ["", nothing, a.found === 1 ? ": 1 lock found, already unlocked or claimed." : `: ${a.found} locks found, all unlocked or claimed.`];
+  return ["", nothing, `: ${a.found} lock${a.found === 1 ? "" : "s"} found; none is a genuine lock before its unlock epoch.`];
+}
 
 /** A lock's checks (counted in "N of M passed") and its token's notes (listed apart, never counted). */
 export function lockChecks(l: LoadedLock): { checks: Check[]; notes: string[] } {
@@ -53,12 +113,15 @@ export function factText(name: LaunchFactName, f: Fact, issued: Fact): string {
       : "At least one lock below could not be read.";
 }
 
-/** The launch verdict: seal kind, title and one-line summary. Never says "safe". */
+/**
+ * The launch verdict: seal kind, title and one-line summary. Never says "safe". A genuine launch
+ * whose lock checks didn't all pass is amber, not mint.
+ */
 export function launchVerdict(p: LaunchProof): { kind: "ok" | "warn" | "bad"; title: string; text: string } {
   if (p.issued === "no") return { kind: "bad", title: "Not a genuine Launch Commitments token", text: "See the failed checks below." };
   if (p.issued === "unknown") return { kind: "warn", title: "Unable to verify", text: "Some data could not be read; treat this token as unverified." };
   return {
-    kind: "ok",
+    kind: p.lockedAtLaunch === "yes" ? "ok" : "warn",
     title: "Genuine Launch Commitments token",
     text:
       p.lockedAtLaunch === "yes"

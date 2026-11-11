@@ -216,6 +216,9 @@ export function readVault(value: Json): VaultBalance | null {
   return amount === null ? null : { resource: inner.address, amount, nftCount: null };
 }
 
+/** The one lock risk that means "couldn't read", not "the issuer can": pages word it apart. */
+export const HOOK_UNREADABLE = "The token's transfer-hook setting could not be read.";
+
 /**
  * What the token's issuer can still do. An updater of "Owner" is unreachable when the resource
  * has no owner, so it counts as locked.
@@ -234,7 +237,7 @@ export function readResource(value: Json): ResourceReading | null {
   if (!fixed("freeze", "DenyAll")) lockRisks.push("The issuer can freeze vaults, including a lock's vault.");
   if (!fixed("withdraw", "AllowAll")) lockRisks.push("Withdrawals are restricted, so a claim could be blocked.");
   if (!fixed("deposit", "AllowAll")) lockRisks.push("Deposits are restricted, so claimed tokens could be refused.");
-  if (!("auth_hook" in r)) lockRisks.push("The token's transfer-hook setting could not be read.");
+  if (!("auth_hook" in r)) lockRisks.push(HOOK_UNREADABLE);
   else if (r.auth_hook !== null) lockRisks.push("A hook contract can veto transfers.");
   else if (!locked(rules.auth_hook_updater)) lockRisks.push("A transfer hook can still be added later.");
 

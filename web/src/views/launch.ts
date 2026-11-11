@@ -73,7 +73,8 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
   const v = launchVerdict(p);
   page.append(
     verdictPanel(v.kind, v.title, v.text, [
-      still ? h("p", { class: "verdict-summary" }, "Still locked now: ", h("strong", {}, still.amount)) : null,
+      // A zero says why in the seal itself, so "0 of …" never reads as a failure.
+      still ? h("p", { class: "verdict-summary" }, "Still locked now: ", h("strong", {}, still.amount), p.stillLocked === 0n ? ` · ${still.note}` : null) : null,
     ]),
   );
 

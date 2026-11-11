@@ -78,7 +78,12 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
   const whenOut = h("p", { class: "muted small", "aria-live": "polite" });
   const meRadio = h("input", { type: "radio", name: "ben", value: "me", checked: true }) as HTMLInputElement;
   const otherRadio = h("input", { type: "radio", name: "ben", value: "other" }) as HTMLInputElement;
-  const other = h("input", { id: "other", type: "text", placeholder: "Ootle address (otl_…) or public key (64 hex)", autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
+  const other = h("input", { id: "other", type: "text", placeholder: "otl_… or 64-hex public key", autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
+  // Asked for only when "Someone else" is chosen; "Me" never reads it.
+  const otherField = h("div", { hidden: true }, h("label", { for: "other" }, "Their Ootle address or public key"), other);
+  const showOther = () => (otherField.hidden = !otherRadio.checked);
+  meRadio.addEventListener("change", showOther);
+  otherRadio.addEventListener("change", showOther);
   const memo = h("input", { id: "memo", type: "text", maxlength: String(MAX_MEMO_BYTES), placeholder: "e.g. Team allocation, 12-month cliff" }) as HTMLInputElement;
   const errors = h("p", { class: "error", "aria-live": "polite" });
   const review = h("div");
@@ -116,8 +121,7 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
       h("legend", {}, "Beneficiary (who can claim)"),
       h("label", { class: "inline" }, meRadio, " Me (this wallet)"),
       h("label", { class: "inline" }, otherRadio, " Someone else"),
-      h("label", { for: "other" }, "Their Ootle address or public key"),
-      other,
+      otherField,
     ),
     h("label", { for: "memo" }, "Memo (public, optional)"),
     memo,
