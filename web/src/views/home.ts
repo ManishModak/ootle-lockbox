@@ -63,7 +63,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
         h(
           "p",
           { class: "lede" },
-          "Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early — unless the token's own rules let its issuer. Each lock's proof page checks whether they do. No Lockbox fee; network fees apply.",
+          "Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early — unless the token's own rules let its issuer do so. Each lock's proof page checks whether they do. No Lockbox fee; network fees apply.",
         ),
         ...actions,
       ),

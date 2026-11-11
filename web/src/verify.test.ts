@@ -156,10 +156,12 @@ describe("readResource", () => {
     expect(risks.some((x) => x.includes("freeze"))).toBe(false);
   });
 
-  it("treats a missing hook field as a risk, not as no hook", () => {
+  it("treats a missing hook field as unreadable, not as no hook", () => {
     const noField = clone(tariFixture) as { Resource: Record<string, unknown> };
     delete noField.Resource.auth_hook;
-    expect(readResource(noField)?.lockRisks.some((x) => x.includes("hook"))).toBe(true);
+    const r = readResource(noField);
+    expect(r?.lockRisks).toEqual([]);
+    expect(r?.unreadable).toEqual(["The token's transfer-hook setting could not be read."]);
   });
 
   it("notes mintable supply without calling it a lock risk", () => {

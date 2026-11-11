@@ -40,12 +40,15 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
       ? notice("info", "This token says it was launched with Launch Commitments. ", link(net, `launch/${id}`, "Check its launch proof"), ".")
       : null,
     verdictPanel(v.kind, v.title, v.text, [total, note ? h("p", { class: "verdict-note" }, note) : null]),
-    r.lockRisks.length || r.notes.length
+    r.lockRisks.length || r.unreadable.length || r.notes.length
       ? h(
           "section",
           { class: "panel checks-panel" },
+          // Issuer powers under the verdict's heading; unread rules always in their own list, never as powers.
           r.lockRisks.length ? h("h2", {}, v.listTitle) : null,
           r.lockRisks.length ? checkList(r.lockRisks.map((x) => ({ ok: false, label: x }))) : null,
+          r.unreadable.length ? h(r.lockRisks.length ? "h3" : "h2", { class: r.lockRisks.length ? "sub-list" : undefined }, "Couldn't be read") : null,
+          r.unreadable.length ? checkList(r.unreadable.map((x) => ({ ok: false, unknown: true, label: x }))) : null,
           r.notes.length ? notesList(r.notes, "Doesn't affect locks.") : null,
         )
       : null,
@@ -98,7 +101,9 @@ async function showLocks(net: NetConfig, id: string, r: ResourceReading, epoch: 
       !found.complete || mine.length > events.length ? `Only the newest ${events.length} locks were read.` : "",
       failed ? `${failed} lock(s) could not be read.` : "",
     ].filter(Boolean);
-    if (gaps.length) body.append(notice("warn", `${gaps.join(" ")} The locked total is at least the amount shown.`));
+    // "At least the amount shown" only when an amount is shown; otherwise the line above says it's unavailable.
+    const bound = lockedNowOf(locks) > 0n ? "The locked total is at least the amount shown." : "The locked total couldn't be determined.";
+    if (gaps.length) body.append(notice("warn", `${gaps.join(" ")} ${bound}`));
     body.append(h("p", { class: "muted small" }, `Read from ${indexerHost(net)} at epoch ${epoch}.`));
   } catch (e) {
     if (!here()) return;
@@ -113,10 +118,7 @@ async function showLocks(net: NetConfig, id: string, r: ResourceReading, epoch: 
 
 /** The still-locked total of a token's locks. `complete` = every lock of the token was read. */
 function lockedTotal(locks: LoadedLock[], div: number, symbol: string | null, supply: bigint | null, complete: boolean): (Node | string)[] {
-  // Only genuine locks still before their unlock epoch count as locked supply.
-  const lockedNow = locks
-    .filter((l) => l.reading.genuine && l.status === "locked" && l.vault?.amount)
-    .reduce((sum, l) => sum + (l.vault!.amount ?? 0n), 0n);
+  const lockedNow = lockedNowOf(locks);
   const [lead, bold, rest] = lockedTotalLine({
     lockedNow,
     amount: `${formatAmount(lockedNow, div)} ${symbol ?? ""}`.trim(),
@@ -127,6 +129,11 @@ function lockedTotal(locks: LoadedLock[], div: number, symbol: string | null, su
     complete,
   });
   return [lead, h("strong", {}, bold), rest];
+}
+
+/** Only genuine locks still before their unlock epoch count as locked supply. */
+function lockedNowOf(locks: LoadedLock[]): bigint {
+  return locks.filter((l) => l.reading.genuine && l.status === "locked" && l.vault?.amount).reduce((sum, l) => sum + (l.vault!.amount ?? 0n), 0n);
 }
 
 /** Locks as a table: each one's holding, unlock epoch, lifecycle and verdict. */

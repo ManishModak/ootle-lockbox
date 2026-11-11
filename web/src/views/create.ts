@@ -187,12 +187,15 @@ async function reviewBox(
   form: HTMLElement,
 ): Promise<HTMLElement> {
   const box = h("section", { class: "card review" }, h("h2", {}, "Review"));
+  // Issuer powers and rules that couldn't be read both stop Verified, but are worded apart.
   let risks: string[] = [];
+  let unread: string[] = [];
   try {
     const r = readResource((await getSubstate(net, b.resourceAddress)).value);
-    risks = r ? r.lockRisks : ["The token's rules could not be read."];
+    if (r) [risks, unread] = [r.lockRisks, r.unreadable];
+    else unread = ["The token's rules could not be read."];
   } catch (e) {
-    risks = [`The token's rules could not be read: ${errorText(e)}`];
+    unread = [`The token's rules could not be read: ${errorText(e)}`];
   }
   const sym = b.symbol ?? "tokens";
   box.append(
@@ -211,8 +214,21 @@ async function reviewBox(
       memo ? h("dd", { class: "memo" }, memo) : null,
     ),
     risks.length
-      ? h("div", {}, notice("warn", h("strong", {}, "This lock won't be marked verified. "), "The token's issuer could still undo it:"), checkList(risks.map((x) => ({ ok: false, label: x }))))
-      : notice("ok", "This token's issuer can't undo the lock, so its proof page will show Verified."),
+      ? h(
+          "div",
+          {},
+          notice("warn", h("strong", {}, "This lock won't be marked verified. "), "The token's issuer could still undo it:"),
+          checkList(risks.map((x) => ({ ok: false, label: x }))),
+          unread.length ? checkList(unread.map((x) => ({ ok: false, unknown: true, label: x }))) : null,
+        )
+      : unread.length
+        ? h(
+            "div",
+            {},
+            notice("warn", h("strong", {}, "This lock won't be marked verified yet. "), "Part of the token's rules couldn't be read, so its proof page can't verify it until they can:"),
+            checkList(unread.map((x) => ({ ok: false, unknown: true, label: x }))),
+          )
+        : notice("ok", "This token's issuer can't undo the lock, so its proof page will show Verified."),
     notice("bad", h("strong", {}, "This can't be undone. "), "Nobody can release the tokens before the unlock epoch, and only the beneficiary key above can claim them. Check the key carefully."),
   );
   const status = h("p", { class: "muted", "aria-live": "polite" });

@@ -92,7 +92,8 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
       ...fact("Locked at launch", "lockedAtLaunch", p.lockedAtLaunch),
       h("dt", {}, "Still locked now"),
       still
-        ? h("dd", { class: "fact" }, h("strong", {}, still.amount), h("span", { class: "muted" }, ` · ${still.note}`))
+        ? // A zero's note is already in the seal; don't repeat it here.
+          h("dd", { class: "fact" }, h("strong", {}, still.amount), p.stillLocked === 0n ? null : h("span", { class: "muted" }, ` · ${still.note}`))
         : h("dd", { class: "fact" }, p.lockedAtLaunch === "yes" || p.lockedAtLaunch === "unknown" ? pill("Unable to verify", "warn") : "—"),
       h("dt", {}, "Supply"),
       h("dd", {}, t.totalSupply === null ? "unknown" : `${formatAmount(t.totalSupply, div)} ${sym}`),

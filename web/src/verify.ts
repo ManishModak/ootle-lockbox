@@ -9,11 +9,15 @@
  */
 import { isValidPublicKey } from "./newlock";
 
-/** One line on a proof page: passed or not, with a plain-language reason. */
+/**
+ * One line on a proof page: passed or not, with a plain-language reason. `unknown` marks a check
+ * that didn't pass only because its data couldn't be read; it still never counts as passed.
+ */
 export interface Check {
   ok: boolean;
   label: string;
   detail?: string;
+  unknown?: boolean;
 }
 
 /** The fields of a `Lockbox` component, in the template's struct order. */
@@ -53,8 +57,10 @@ export interface ResourceReading {
   launchedBy: string | null;
   divisibility: number;
   totalSupply: bigint | null;
-  /** Things the issuer can still do that would undo or block a lock. Empty = safe to lock. */
+  /** Things the issuer can still do that would undo or block a lock. */
   lockRisks: string[];
+  /** Rules that decide whether a lock holds but couldn't be read. Blocks "verified" like a risk. */
+  unreadable: string[];
   /** Facts worth knowing that don't affect a lock (e.g. supply can grow). */
   notes: string[];
 }
@@ -114,7 +120,7 @@ export function readLock(value: Json, lockboxTemplate: string): LockReading {
   const checks: Check[] = [];
   const add = (ok: Tri, label: string, detail?: string) => {
     results.push(ok);
-    checks.push({ ok: ok === true, label, detail: ok === true ? undefined : ok === null ? "could not be read" : detail });
+    checks.push(ok === null ? { ok: false, label, detail: "could not be read", unknown: true } : { ok, label, detail: ok ? undefined : detail });
   };
   const when = (k: string, cond: (v: Json) => boolean): Tri => (header[k] === undefined ? null : cond(header[k]));
 
@@ -216,47 +222,70 @@ export function readVault(value: Json): VaultBalance | null {
   return amount === null ? null : { resource: inner.address, amount, nftCount: null };
 }
 
-/** The one lock risk that means "couldn't read", not "the issuer can": pages word it apart. */
-export const HOOK_UNREADABLE = "The token's transfer-hook setting could not be read.";
-
 /**
- * What the token's issuer can still do. An updater of "Owner" is unreachable when the resource
- * has no owner, so it counts as locked.
+ * What the token's issuer can still do (`lockRisks`) and which of its rules couldn't be read
+ * (`unreadable`). Each rule is three-way: a permissive value is a power, a missing value is
+ * unreadable, never a power. An updater of "Owner" is unreachable when the resource has no owner,
+ * so it counts as locked; with the owner rule unreadable, it is unreadable too.
  */
 export function readResource(value: Json): ResourceReading | null {
   const r = isObj(value) && isObj(value.Resource) ? value.Resource : null;
   const rules = r && isObj(r.access_rules) ? r.access_rules : null;
   if (!r || !rules) return null;
-  const ownerless = r.owner_rule === "None";
-  const locked = (updater: Json) => updater === "Locked" || (updater === "Owner" && ownerless);
-  const fixed = (rule: string, want: string) => rules[rule] === want && locked(rules[`${rule}_updater`]);
-
+  const ownerless: Tri = r.owner_rule === undefined ? null : r.owner_rule === "None";
+  const locked = (updater: Json): Tri => (updater === undefined ? null : updater === "Locked" ? true : updater === "Owner" ? ownerless : false);
   const lockRisks: string[] = [];
-  if (!ownerless) lockRisks.push("The token has an owner, who can bypass its rules (for example mint or freeze).");
-  if (!fixed("recall", "DenyAll")) lockRisks.push("The issuer can recall tokens, including out of a lock.");
-  if (!fixed("freeze", "DenyAll")) lockRisks.push("The issuer can freeze vaults, including a lock's vault.");
-  if (!fixed("withdraw", "AllowAll")) lockRisks.push("Withdrawals are restricted, so a claim could be blocked.");
-  if (!fixed("deposit", "AllowAll")) lockRisks.push("Deposits are restricted, so claimed tokens could be refused.");
-  if (!("auth_hook" in r)) lockRisks.push(HOOK_UNREADABLE);
+  const unreadable: string[] = [];
+  const both = (a: Tri, b: Tri): Tri => (a === false || b === false ? false : a === null || b === null ? null : true);
+  // A rule is fixed when it holds `want` and can never change; `name` words what couldn't be read.
+  const fixed = (rule: string, want: string, name: string, power: string) => {
+    const value: Tri = rules[rule] === undefined ? null : rules[rule] === want;
+    const ok = both(value, locked(rules[`${rule}_updater`]));
+    if (ok === false) lockRisks.push(power);
+    else if (ok === null) unreadable.push(value === null ? `The token's ${name} rule could not be read.` : `Whether the token's ${name} rule can change could not be read.`);
+  };
+
+  if (ownerless === false) lockRisks.push("The token has an owner, who can bypass its rules (for example mint or freeze).");
+  else if (ownerless === null) unreadable.push("The token's owner rule could not be read.");
+  fixed("recall", "DenyAll", "recall", "The issuer can recall tokens, including out of a lock.");
+  fixed("freeze", "DenyAll", "freeze", "The issuer can freeze vaults, including a lock's vault.");
+  fixed("withdraw", "AllowAll", "withdraw", "Withdrawals are restricted, so a claim could be blocked.");
+  fixed("deposit", "AllowAll", "deposit", "Deposits are restricted, so claimed tokens could be refused.");
+  if (!("auth_hook" in r)) unreadable.push("The token's transfer-hook setting could not be read.");
   else if (r.auth_hook !== null) lockRisks.push("A hook contract can veto transfers.");
-  else if (!locked(rules.auth_hook_updater)) lockRisks.push("A transfer hook can still be added later.");
+  else {
+    const hookLocked = locked(rules.auth_hook_updater);
+    if (hookLocked === false) lockRisks.push("A transfer hook can still be added later.");
+    else if (hookLocked === null) unreadable.push("Whether a transfer hook can be added later could not be read.");
+  }
 
+  // Notes never affect a lock; a missing rule is still worded as unread, not as a power.
   const notes: string[] = [];
-  if (!fixed("mint", "DenyAll")) notes.push("More tokens can be minted, so supply can grow.");
-  if (!locked(rules.metadata_updater) || rules.update_metadata !== "DenyAll") notes.push("Name and metadata can change.");
+  const mint = both(rules.mint === undefined ? null : rules.mint === "DenyAll", locked(rules.mint_updater));
+  if (mint === false) notes.push("More tokens can be minted, so supply can grow.");
+  else if (mint === null) notes.push("Whether more tokens can be minted could not be read.");
+  const meta = both(rules.update_metadata === undefined ? null : rules.update_metadata === "DenyAll", locked(rules.metadata_updater));
+  if (meta === false) notes.push("Name and metadata can change.");
+  else if (meta === null) notes.push("Whether the name and metadata can change could not be read.");
 
-  const meta = isObj(r.metadata) ? r.metadata : {};
+  const md = isObj(r.metadata) ? r.metadata : {};
   const str = (x: Json) => (typeof x === "string" ? x : null);
   return {
     type: String(r.resource_type ?? "unknown"),
-    symbol: str(meta.SYMBOL) ?? str(meta.symbol),
-    name: str(meta.name) ?? str(meta.NAME),
-    launchedBy: str(meta.launched_by),
+    symbol: str(md.SYMBOL) ?? str(md.symbol),
+    name: str(md.name) ?? str(md.NAME),
+    launchedBy: str(md.launched_by),
     divisibility: typeof r.divisibility === "number" ? r.divisibility : 0,
     totalSupply: r.total_supply === null ? null : toBigInt(r.total_supply),
     lockRisks,
+    unreadable,
     notes,
   };
+}
+
+/** True only when nothing can undo a lock: no issuer power and no unread rule. */
+export function tokenLockSafe(r: Pick<ResourceReading, "lockRisks" | "unreadable">): boolean {
+  return r.lockRisks.length === 0 && r.unreadable.length === 0;
 }
 
 /** Locked until the epoch; then claimable until claimed. A claimed lock's vault is empty. */

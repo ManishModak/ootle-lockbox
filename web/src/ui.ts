@@ -198,13 +198,9 @@ export function loadError(net: NetConfig, what: string, id: string, path: string
       : kind === "incomplete"
         ? [
             h("h1", {}, `Couldn't read the complete proof on ${net.label}`),
-            h(
-              "p",
-              { class: "muted" },
-              `Something the proof of ${what} `,
-              h("code", { title: id }, short(id)),
-              " depends on wasn't found, so no verdict is shown. The indexer may be behind; try again in a minute.",
-            ),
+            h("p", {}, `Some data needed to check this ${what} couldn't be found, so no verdict is shown.`),
+            h("p", { class: "error-addr" }, h("span", { class: "muted" }, `${what[0].toUpperCase()}${what.slice(1)}: `), addressLine(id)),
+            h("p", { class: "muted" }, "The indexer may be behind; try again in a minute."),
             h("div", { class: "row" }, retry, back),
           ]
         : [

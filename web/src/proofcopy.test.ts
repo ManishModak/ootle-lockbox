@@ -3,14 +3,16 @@ import type { LaunchProof } from "./launch";
 import type { LoadedLock } from "./lockdata";
 import { IndexerError } from "./indexer";
 import { factText, launchVerdict, loadFailure, lockChecks, lockedTotalLine, notesLine, stillLockedText, tokenVerdict, type LaunchFactName } from "./proofcopy";
-import { HOOK_UNREADABLE, type Fact } from "./verify";
+import { verdict } from "./lockdata";
+import { readResource, type Fact } from "./verify";
+import tariFixture from "./fixtures/esmeralda-tari-resource.json";
 
-const lock = (lockRisks: string[], notes: string[]): LoadedLock =>
+const lock = (lockRisks: string[], notes: string[], unreadable: string[] = []): LoadedLock =>
   ({
     id: "component_x",
     reading: { checks: [{ ok: true, label: "Runs the Lockbox template" }], genuine: true, state: null },
-    vault: null,
-    resource: { lockRisks, notes },
+    vault: { resource: "resource_x", amount: 1n, nftCount: null },
+    resource: { lockRisks, unreadable, notes },
     status: "locked",
     indexerVerified: true,
   }) as unknown as LoadedLock;
@@ -26,6 +28,19 @@ describe("lockChecks", () => {
   it("fails the issuer check with the risks as its detail", () => {
     const { checks } = lockChecks(lock(["The issuer can recall tokens, including out of a lock."], []));
     expect(checks[1]).toEqual({ ok: false, label: "The token's issuer cannot undo the lock", detail: "The issuer can recall tokens, including out of a lock." });
+  });
+
+  it("shows unread token rules as a check that couldn't be done, never as passed", () => {
+    const l = lock([], [], ["The token's recall rule could not be read."]);
+    expect(lockChecks(l).checks[1]).toEqual({
+      ok: false,
+      unknown: true,
+      label: "The token's issuer cannot undo the lock",
+      detail: "The token's recall rule could not be read.",
+    });
+    expect(verdict(l)).toBe("unknown");
+    expect(verdict(lock(["The issuer can recall tokens, including out of a lock."], [], ["The token's freeze rule could not be read."]))).toBe("unverified");
+    expect(verdict(lock([], []))).toBe("verified");
   });
 });
 
@@ -81,6 +96,9 @@ describe("launchVerdict", () => {
     expect(launchVerdict(proof({ lockedAtLaunch: "unknown" })).kind).toBe("warn");
     expect(launchVerdict(proof({ lockedAtLaunch: "no" })).kind).toBe("warn");
     expect(launchVerdict(proof({ issued: "unknown" })).kind).toBe("warn");
+    // An amber seal's title matches its colour.
+    expect(launchVerdict(proof({ lockedAtLaunch: "no" })).title).toBe("Genuine launch; a launch lock didn't verify");
+    expect(launchVerdict(proof({ lockedAtLaunch: "unknown" })).title).toBe("Genuine launch; a launch lock couldn't be checked");
   });
 });
 
@@ -115,15 +133,54 @@ describe("loadFailure", () => {
 });
 
 describe("tokenVerdict", () => {
-  it("says the issuer can undo a lock only for a real risk", () => {
-    expect(tokenVerdict({ lockRisks: [] }).kind).toBe("ok");
-    expect(tokenVerdict({ lockRisks: ["The issuer can recall tokens, including out of a lock."] }).title).toBe("The issuer can undo a lock");
-    expect(tokenVerdict({ lockRisks: [HOOK_UNREADABLE, "The issuer can freeze vaults, including a lock's vault."] }).kind).toBe("bad");
+  // The real tTARI rules with one field removed or changed, read the way the token page reads them.
+  const tari = () => JSON.parse(JSON.stringify(tariFixture)) as { Resource: Record<string, unknown> & { access_rules: Record<string, unknown> } };
+  const read = (edit: (t: ReturnType<typeof tari>) => void) => {
+    const t = tari();
+    edit(t);
+    const r = readResource(t)!;
+    return { r, v: tokenVerdict(r) };
+  };
+  const notVerified = { kind: "warn", title: "Not verified for Lockbox", text: "Part of this token's rules couldn't be read, so its locks can't be verified until they can.", listTitle: "Couldn't be read" };
+
+  it("reads the complete tTARI rules as safe", () => {
+    expect(read(() => {}).v.kind).toBe("ok");
   });
 
-  it("calls unreadable rules 'Not verified for Lockbox', not a risk", () => {
-    const v = tokenVerdict({ lockRisks: [HOOK_UNREADABLE] });
-    expect(v).toMatchObject({ kind: "warn", title: "Not verified for Lockbox", listTitle: "What couldn't be read" });
+  it.each([
+    ["owner_rule", (t: ReturnType<typeof tari>) => delete t.Resource.owner_rule, "The token's owner rule could not be read."],
+    ["recall", (t: ReturnType<typeof tari>) => delete t.Resource.access_rules.recall, "The token's recall rule could not be read."],
+    ["recall_updater", (t: ReturnType<typeof tari>) => delete t.Resource.access_rules.recall_updater, "Whether the token's recall rule can change could not be read."],
+    ["freeze_updater", (t: ReturnType<typeof tari>) => delete t.Resource.access_rules.freeze_updater, "Whether the token's freeze rule can change could not be read."],
+    ["auth_hook", (t: ReturnType<typeof tari>) => delete t.Resource.auth_hook, "The token's transfer-hook setting could not be read."],
+  ])("a missing %s is unreadable, never an issuer power", (_, edit, line) => {
+    const { r, v } = read(edit);
+    expect(r.lockRisks).toEqual([]);
+    expect(r.unreadable).toEqual([line]);
+    expect(v).toEqual(notVerified);
+  });
+
+  it("a missing withdraw, deposit or hook updater is unreadable too", () => {
+    for (const k of ["withdraw", "deposit_updater", "auth_hook_updater"]) {
+      const { r, v } = read((t) => delete t.Resource.access_rules[k]);
+      expect(r.lockRisks).toEqual([]);
+      expect(r.unreadable).toHaveLength(1);
+      expect(v.kind).toBe("warn");
+    }
+  });
+
+  it("with a real power and a missing field, lists each under its own heading", () => {
+    const { r, v } = read((t) => {
+      t.Resource.access_rules.recall = "AllowAll";
+      delete t.Resource.access_rules.freeze;
+    });
+    expect(r.lockRisks).toEqual(["The issuer can recall tokens, including out of a lock."]);
+    expect(r.unreadable).toEqual(["The token's freeze rule could not be read."]);
+    expect(v).toMatchObject({ kind: "bad", title: "The issuer can undo a lock", listTitle: "What the issuer can still do" });
+  });
+
+  it("never says 'never marked verified'", () => {
+    for (const x of [tokenVerdict({ lockRisks: ["p"], unreadable: [] }), tokenVerdict({ lockRisks: [], unreadable: ["u"] })]) expect(x.text).not.toMatch(/never marked/);
   });
 });
 

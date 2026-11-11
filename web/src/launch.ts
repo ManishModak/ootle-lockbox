@@ -72,7 +72,7 @@ export interface LaunchProof {
 /** A check's outcome: passed, failed, or not decidable from the data. */
 type Tri = boolean | null;
 
-/** A three-way check; null (unknown) shows as failed with "could not be read". */
+/** A three-way check; null (unknown) shows as not passed, marked unknown, with "could not be read". */
 interface TriCheck {
   ok: Tri;
   label: string;
@@ -80,7 +80,7 @@ interface TriCheck {
 }
 
 const toCheck = (c: TriCheck): Check =>
-  c.ok === true ? { ok: true, label: c.label } : { ok: false, label: c.label, detail: c.ok === null ? "could not be read" : c.detail };
+  c.ok === true ? { ok: true, label: c.label } : c.ok === null ? { ok: false, label: c.label, detail: "could not be read", unknown: true } : { ok: false, label: c.label, detail: c.detail };
 
 /** Folds checks: any explicit failure is "no", else any unknown is "unknown", else "yes". */
 function fold(checks: TriCheck[]): Fact {

@@ -58,7 +58,8 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
   // claim comes only after the checks have been read.
   const claim = s && l.status === "claimable" && l.reading.genuine ? claimBox(net, l) : null;
   const goToClaim = () => {
-    claim?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    claim?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
     claim?.querySelector("button")?.focus({ preventScroll: true });
   };
   const toClaim = claim && v === "verified" ? h("p", { class: "verdict-action" }, h("button", { type: "button", class: "small", onclick: goToClaim }, "Claim tokens")) : null;
@@ -150,9 +151,9 @@ export function checkList(checks: Check[]): HTMLElement {
     ...checks.map((c) =>
       h(
         "li",
-        { class: c.ok ? "ok" : "bad" },
-        h("span", { class: "mark", "aria-hidden": "true" }, c.ok ? "✓" : "✕"),
-        h("span", { class: "sr" }, c.ok ? "Passed: " : "Failed: "),
+        { class: c.ok ? "ok" : c.unknown ? "unknown" : "bad" },
+        h("span", { class: "mark", "aria-hidden": "true" }, c.ok ? "✓" : c.unknown ? "?" : "✕"),
+        h("span", { class: "sr" }, c.ok ? "Passed: " : c.unknown ? "Couldn't check: " : "Failed: "),
         h("span", { class: "check-text" }, c.label, c.detail ? h("span", { class: "check-detail" }, c.detail) : null),
       ),
     ),
@@ -184,10 +185,12 @@ export function notesList(notes: string[], detail: string): HTMLElement {
 /** "Checks" with how many passed, then the list and any notes (not counted), as one panel on a proof page. */
 export function checksSection(checks: Check[], notes: string[] = [], noteDetail = ""): HTMLElement {
   const passed = checks.filter((c) => c.ok).length;
+  // Coral only when a check actually failed; checks that couldn't be read alone are amber.
+  const tone = passed === checks.length ? "ok" : checks.some((c) => !c.ok && !c.unknown) ? "bad" : "warn";
   return h(
     "section",
     { class: "panel checks-panel" },
-    h("div", { class: "checks-head" }, h("h2", {}, "Checks"), h("span", { class: passed === checks.length ? "count ok" : "count bad" }, `${passed} of ${checks.length} passed`)),
+    h("div", { class: "checks-head" }, h("h2", {}, "Checks"), h("span", { class: `count ${tone}` }, `${passed} of ${checks.length} passed`)),
     checkList(checks),
     notes.length ? notesList(notes, noteDetail) : null,
   );

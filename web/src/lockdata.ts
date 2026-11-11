@@ -10,6 +10,7 @@ import {
   readLock,
   readResource,
   readVault,
+  tokenLockSafe,
   type LockReading,
   type LockStatus,
   type ResourceReading,
@@ -52,11 +53,15 @@ export async function loadLock(net: NetConfig, id: string, epoch: number): Promi
   };
 }
 
-/** A lock is "verified" only when the lock is genuine, readable, and the token can't undo it. */
+/**
+ * A lock is "verified" only when the lock is genuine, readable, and the token can't undo it. An
+ * issuer power makes it "unverified"; token rules that couldn't be read make it "unknown".
+ */
 export function verdict(l: LoadedLock): "verified" | "unverified" | "unknown" {
   if (!l.reading.genuine) return "unverified";
   if (!l.vault || !l.resource) return "unknown";
-  return l.resource.lockRisks.length === 0 ? "verified" : "unverified";
+  if (l.resource.lockRisks.length > 0) return "unverified";
+  return tokenLockSafe(l.resource) ? "verified" : "unknown";
 }
 
 /** Runs async work over items with a small concurrency limit (the indexer is shared). */

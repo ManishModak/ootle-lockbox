@@ -6,7 +6,7 @@
 import { IndexerError } from "./indexer";
 import type { LaunchProof } from "./launch";
 import type { LoadedLock } from "./lockdata";
-import { formatAmount, HOOK_UNREADABLE, type Check, type Fact, type ResourceReading } from "./verify";
+import { formatAmount, tokenLockSafe, type Check, type Fact, type ResourceReading } from "./verify";
 
 /**
  * How a page that failed to load words it: "absent" only when the address the page asked for is
@@ -19,26 +19,37 @@ export function loadFailure(e: unknown, id: string): "absent" | "incomplete" | "
 }
 
 /**
- * The token page's verdict: "can undo" only for a real risk; a rule that couldn't be read gives
- * "Not verified for Lockbox", with the reasons listed under `listTitle`.
+ * The token page's verdict. "Can undo" only for a real issuer power, listed under `listTitle`;
+ * rules that couldn't be read never join that list: alone they give "Not verified for Lockbox",
+ * and beside a power they get their own "Couldn't be read" list.
  */
-export function tokenVerdict(r: Pick<ResourceReading, "lockRisks">): { kind: "ok" | "warn" | "bad"; title: string; text: string; listTitle: string } {
-  if (r.lockRisks.length === 0) {
+export function tokenVerdict(r: Pick<ResourceReading, "lockRisks" | "unreadable">): {
+  kind: "ok" | "warn" | "bad";
+  title: string;
+  text: string;
+  listTitle: string;
+} {
+  if (r.lockRisks.length > 0) {
     return {
-      kind: "ok",
-      title: "The issuer can't undo a lock",
-      text: "This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.",
-      listTitle: "",
+      kind: "bad",
+      title: "The issuer can undo a lock",
+      text: "This token's own rules let its issuer undo or block a lock, so its locks can't be verified.",
+      listTitle: "What the issuer can still do",
     };
   }
-  if (r.lockRisks.some((x) => x !== HOOK_UNREADABLE)) {
-    return { kind: "bad", title: "The issuer can undo a lock", text: "Locks of this token are never marked verified.", listTitle: "What the issuer can still do" };
+  if (r.unreadable.length > 0) {
+    return {
+      kind: "warn",
+      title: "Not verified for Lockbox",
+      text: "Part of this token's rules couldn't be read, so its locks can't be verified until they can.",
+      listTitle: "Couldn't be read",
+    };
   }
   return {
-    kind: "warn",
-    title: "Not verified for Lockbox",
-    text: "Part of this token's rules could not be read, so locks of it are never marked verified.",
-    listTitle: "What couldn't be read",
+    kind: "ok",
+    title: "The issuer can't undo a lock",
+    text: "This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.",
+    listTitle: "",
   };
 }
 
@@ -67,12 +78,20 @@ export function lockedTotalLine(a: {
   return ["", nothing, `: ${a.found} lock${a.found === 1 ? "" : "s"} found; none is a genuine lock before its unlock epoch.`];
 }
 
-/** A lock's checks (counted in "N of M passed") and its token's notes (listed apart, never counted). */
+/**
+ * A lock's checks (counted in "N of M passed") and its token's notes (listed apart, never counted).
+ * The token check fails on an issuer power or an unread rule; an unread rule is worded "could not be
+ * read", the way the lock's own unknown checks are.
+ */
 export function lockChecks(l: LoadedLock): { checks: Check[]; notes: string[] } {
   const r = l.resource;
-  const token: Check = r
-    ? { ok: r.lockRisks.length === 0, label: "The token's issuer cannot undo the lock", detail: r.lockRisks.join(" ") || undefined }
-    : { ok: false, label: "Token rules are readable" };
+  const label = "The token's issuer cannot undo the lock";
+  // Each unread rule's line already says "could not be read", so it never reads as a power.
+  const token: Check = !r
+    ? { ok: false, label: "Token rules are readable" }
+    : tokenLockSafe(r)
+      ? { ok: true, label }
+      : { ok: false, label, detail: [...r.lockRisks, ...r.unreadable].join(" "), unknown: r.lockRisks.length === 0 || undefined };
   return { checks: [...l.reading.checks, token], notes: r?.notes ?? [] };
 }
 
@@ -122,7 +141,13 @@ export function launchVerdict(p: LaunchProof): { kind: "ok" | "warn" | "bad"; ti
   if (p.issued === "unknown") return { kind: "warn", title: "Unable to verify", text: "Some data could not be read; treat this token as unverified." };
   return {
     kind: p.lockedAtLaunch === "yes" ? "ok" : "warn",
-    title: "Genuine Launch Commitments token",
+    // An amber seal's title says what is amber, so it never reads as a clean pass.
+    title:
+      p.lockedAtLaunch === "yes"
+        ? "Genuine Launch Commitments token"
+        : p.lockedAtLaunch === "no"
+          ? "Genuine launch; a launch lock didn't verify"
+          : "Genuine launch; a launch lock couldn't be checked",
     text:
       p.lockedAtLaunch === "yes"
         ? "Fixed supply, frozen rules and genuine launch locks, each checked on chain just now."
