@@ -136,7 +136,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
           "ul",
           {},
           h("li", {}, `Locks open at an epoch, not a date. Dates you see are estimates (an epoch is about ${NETWORKS.mainnet.epochMinutes.typical} minutes on mainnet).`),
-          h("li", {}, "A new lock is set so it can't open before the time you pick."),
+          h("li", {}, "A new lock is set so it can't open before the time you pick, unless epochs run much faster than usual."),
           h("li", {}, "Epochs count base-layer blocks. If Tari changes how many blocks make an epoch, unlock times shift too."),
           h("li", {}, "Locks hold public balances. Make private TARI public in your wallet first."),
           h("li", {}, h("a", { href: REPO_URL }, "Open source (MIT)")),

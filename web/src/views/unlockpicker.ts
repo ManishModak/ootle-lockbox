@@ -42,8 +42,9 @@ export function unlockPicker(net: NetConfig, epoch: number, id: string): UnlockP
     line.replaceChildren(
       "Opens around ",
       h("strong", {}, estimatedDate(net, e, epoch)),
-      h("span", { class: "muted" }, " · never before "),
+      h("span", { class: "muted" }, " · not before "),
       formatDate(t),
+      h("span", { class: "muted" }, " unless epochs speed up"),
     );
     how.textContent =
       `It opens at epoch ${e}, ${epochsAsDuration(net, e - epoch)} from now (the chain is at epoch ${epoch}). ` +
