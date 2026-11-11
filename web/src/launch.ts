@@ -67,6 +67,8 @@ export interface LaunchProof {
   stillLocked: bigint | null;
   record: LaunchRecord | null;
   checks: Check[];
+  /** Each listed lock's own "made by this launch with the recorded terms" result; empty unless the launch is genuine. */
+  lockFacts: Map<string, Fact>;
 }
 
 /** A check's outcome: passed, failed, or not decidable from the data. */
@@ -240,13 +242,15 @@ export function launchProof(input: LaunchInputs, launchTemplate: string, current
   const checks = [...rec.checks, ...tokenChecks].map(toCheck);
   let lockedAtLaunch: Fact = issued;
   let stillLocked: bigint | null = null;
+  const lockFacts = new Map<string, Fact>();
   if (record && issued === "yes") {
     const results = record.locks.map((want) => lockCheck(want, input.locks.get(want.lock), input, currentEpoch));
     checks.push(...results.map((x) => toCheck(x.check)));
+    record.locks.forEach((want, i) => lockFacts.set(want.lock, fold([results[i].check])));
     lockedAtLaunch = fold(results.map((x) => x.check));
     stillLocked = results.every((x) => x.stillLocked !== null) ? results.reduce((s, x) => s + (x.stillLocked ?? 0n), 0n) : null;
   }
-  return { fixedSupply, rulesFrozen, issued, lockedAtLaunch, stillLocked, record, checks };
+  return { fixedSupply, rulesFrozen, issued, lockedAtLaunch, stillLocked, record, checks, lockFacts };
 }
 
 /**

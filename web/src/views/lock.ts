@@ -4,7 +4,7 @@ import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
 import { lockChecks, notesLine } from "../proofcopy";
 import { addressLine, epochsAsDuration, errorText, estimatedDate, h, link, loadError, loading, onThisPage, proofTitle, short, statusPill, verdictPanel } from "../ui";
-import { formatAmount, type Check } from "../verify";
+import { tokenAmount, type Check } from "../verify";
 import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, requireWalletNetwork } from "../wallet";
 
 /** Past this many epochs ahead (centuries at any epoch length) no date is estimated. */
@@ -38,7 +38,8 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
   const v = verdict(l);
   const r = l.resource;
   const sym = r?.symbol ?? "tokens";
-  const div = r?.divisibility ?? 0;
+  // No precision, no amount: a missing token reading never falls back to 0 decimals.
+  const div = r?.divisibility ?? null;
   const { checks, notes } = lockChecks(l);
   const page = h("article", { class: "proof" });
 
@@ -46,7 +47,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
     ? h(
         "p",
         { class: "verdict-summary" },
-        h("strong", {}, `${formatAmount(s.lockedAmount, div)} ${sym}`),
+        h("strong", {}, tokenAmount(s.lockedAmount, div, sym)),
         " · beneficiary ",
         h("code", { title: s.beneficiary }, short(s.beneficiary)),
         ` · ${unlockPhrase(net, s.unlockEpoch, epoch)}`,
@@ -98,10 +99,10 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
             ? l.vault?.nftCount !== null && l.vault?.nftCount !== undefined
               ? `${l.vault.nftCount} NFT(s)`
               : "unknown"
-            : `${formatAmount(amountNow, div)} ${sym}`,
+            : tokenAmount(amountNow, div, sym),
         ),
         h("dt", {}, "Originally locked"),
-        h("dd", {}, `${formatAmount(s.lockedAmount, div)} ${sym}`),
+        h("dd", {}, tokenAmount(s.lockedAmount, div, sym)),
         h("dt", {}, "Token"),
         h("dd", {}, l.vault ? addressLine(l.vault.resource, net, `token/${l.vault.resource}`) : "unknown"),
         h("dt", {}, "Unlocks at"),

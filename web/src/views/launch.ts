@@ -5,10 +5,10 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, indexerHost } from "../indexer";
 import type { Fact } from "../launch";
-import { loadLaunch, verdict, type LoadedLaunch } from "../lockdata";
+import { loadLaunch, verdict, type LoadedLaunch, type LoadedLock } from "../lockdata";
 import { factText, launchVerdict, stillLockedText, type LaunchFactName } from "../proofcopy";
 import { addressLine, h, link, loadError, loading, notice, pill, proofTitle, statusPill, verdictPanel, verdictPill } from "../ui";
-import { formatAmount } from "../verify";
+import { tokenAmount } from "../verify";
 import { checksSection } from "./lock";
 import { notPublishedNotice } from "./home";
 
@@ -40,6 +40,15 @@ export async function launchView(net: NetConfig, id: string, root: HTMLElement) 
   }
   root.lastElementChild?.remove();
   root.append(render(net, id, l, epoch));
+}
+
+/**
+ * A launch lock's pill: a lock that failed this launch's check says so, even when it is a valid
+ * Lockbox lock on its own (its lock page still shows that verdict); otherwise the lock's verdict.
+ */
+function launchLockPill(fromLaunch: Fact | undefined, got: LoadedLock | undefined): HTMLElement {
+  if (fromLaunch === "no") return pill("Launch check failed", "bad");
+  return verdictPill(got ? verdict(got) : "unknown");
 }
 
 const FACT_PILL: Record<Fact, [string, "ok" | "bad" | "warn"]> = {
@@ -96,7 +105,7 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
           h("dd", { class: "fact" }, h("strong", {}, still.amount), p.stillLocked === 0n ? null : h("span", { class: "muted" }, ` · ${still.note}`))
         : h("dd", { class: "fact" }, p.lockedAtLaunch === "yes" || p.lockedAtLaunch === "unknown" ? pill("Unable to verify", "warn") : "—"),
       h("dt", {}, "Supply"),
-      h("dd", {}, t.totalSupply === null ? "unknown" : `${formatAmount(t.totalSupply, div)} ${sym}`),
+      h("dd", {}, t.totalSupply === null ? "unknown" : tokenAmount(t.totalSupply, div, sym)),
       h("dt", {}, "Launch record"),
       h("dd", {}, addressLine(l.recordId ?? "")),
       p.record ? h("dt", {}, "Launched at") : null,
@@ -112,10 +121,10 @@ function render(net: NetConfig, id: string, l: LoadedLaunch, epoch: number): HTM
         "tr",
         {},
         h("td", { "data-label": "Lock" }, link(net, `lock/${want.lock}`, h("code", { title: want.lock }, want.lock.slice(10, 22)))),
-        h("td", { class: "num", "data-label": "Amount" }, `${formatAmount(want.amount, div)} ${sym}`),
+        h("td", { class: "num", "data-label": "Amount" }, tokenAmount(want.amount, div, sym)),
         h("td", { "data-label": "Unlocks" }, `epoch ${want.unlockEpoch}${want.unlockEpoch > BigInt(epoch) ? ` (in ${want.unlockEpoch - BigInt(epoch)})` : ""}`),
         h("td", { "data-label": "Beneficiary" }, h("code", { title: want.beneficiary }, `${want.beneficiary.slice(0, 8)}…`)),
-        h("td", { class: "pills", "data-label": "Status" }, h("span", { class: "pill-group" }, statusPill(got?.status), verdictPill(got ? verdict(got) : "unknown"))),
+        h("td", { class: "pills", "data-label": "Status" }, h("span", { class: "pill-group" }, statusPill(got?.status), launchLockPill(p.lockFacts.get(want.lock), got))),
       );
     });
     page.append(

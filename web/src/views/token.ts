@@ -2,9 +2,9 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, getSubstate, indexerHost, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, verdict, type LoadedLock } from "../lockdata";
-import { lockedTotalLine, notesLine, tokenVerdict } from "../proofcopy";
-import { addressLine, errorText, h, link, loadError, loading, notice, onThisPage, proofTitle, statusPill, verdictPanel, verdictPill } from "../ui";
-import { formatAmount, lockedShare, readResource, type ResourceReading } from "../verify";
+import { lockedTotalLine, lockReadGaps, notesLine, tokenVerdict } from "../proofcopy";
+import { addressLine, errorText, h, link, loadError, loading, notice, onThisPage, proofTitle, reloadPage, statusPill, verdictPanel, verdictPill } from "../ui";
+import { lockedShare, readResource, tokenAmount, type ResourceReading } from "../verify";
 import { checkList, notesList } from "./lock";
 
 // Upper bounds on reads per page view; past them the total is shown as a lower bound.
@@ -64,11 +64,11 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
       "dl",
       { class: "stats" },
       h("dt", {}, "Supply"),
-      h("dd", {}, r.totalSupply === null ? "not tracked" : `${formatAmount(r.totalSupply, r.divisibility)}`),
+      h("dd", {}, r.totalSupply === null ? "not tracked" : tokenAmount(r.totalSupply, r.divisibility)),
       h("dt", {}, "Type"),
       h("dd", {}, r.type),
       h("dt", {}, "Decimals"),
-      h("dd", {}, String(r.divisibility)),
+      h("dd", {}, r.divisibility === null ? "unknown" : String(r.divisibility)),
     ),
   );
   root.append(section, details);
@@ -77,12 +77,12 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
 
 /**
  * Finds and reads the token's locks into `section` and the still-locked line into `total`. A
- * failed lookup stays inside this section (the rest of the page is still true), with Retry.
+ * failed lookup stays inside this section (the rest of the page is still true); its Retry reloads
+ * the whole page, so the epoch and token reading are as fresh as the locks.
  */
 async function showLocks(net: NetConfig, id: string, r: ResourceReading, epoch: number, section: HTMLElement, total: HTMLElement) {
   const body = h("div", {}, loading("Looking for locks…"));
-  section.replaceChildren(section.firstElementChild!, body);
-  total.replaceChildren(h("span", { class: "muted" }, "Counting what is still locked…"));
+  section.append(body);
   const here = onThisPage();
   try {
     const found = await lockCreatedEvents(net, MAX_EVENT_PAGES);
@@ -91,25 +91,22 @@ async function showLocks(net: NetConfig, id: string, r: ResourceReading, epoch: 
     const loaded = await mapLimit(events, 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
     if (!here()) return;
     const locks = loaded.filter((x): x is LoadedLock => x !== null);
-    // Locks whose state or still-locked balance couldn't be read count as missing too.
-    const unreadable = (l: LoadedLock) => l.reading.state === null || (l.reading.genuine && l.status === "locked" && l.vault?.amount == null);
-    const failed = loaded.length - locks.length + locks.filter(unreadable).length;
-    const complete = found.complete && mine.length === events.length && failed === 0;
+    const { failed, complete } = lockReadGaps(loaded, found.complete && mine.length === events.length);
     total.replaceChildren(...lockedTotal(locks, r.divisibility, r.symbol, r.totalSupply, complete));
-    body.replaceChildren(lockTable(net, locks, r.divisibility, epoch));
+    body.replaceChildren(lockTable(net, locks, epoch));
     const gaps = [
       !found.complete || mine.length > events.length ? `Only the newest ${events.length} locks were read.` : "",
       failed ? `${failed} lock(s) could not be read.` : "",
     ].filter(Boolean);
     // "At least the amount shown" only when an amount is shown; otherwise the line above says it's unavailable.
-    const bound = lockedNowOf(locks) > 0n ? "The locked total is at least the amount shown." : "The locked total couldn't be determined.";
+    const bound = lockedNowOf(locks) > 0n && r.divisibility !== null ? "The locked total is at least the amount shown." : "The locked total couldn't be determined.";
     if (gaps.length) body.append(notice("warn", `${gaps.join(" ")} ${bound}`));
     body.append(h("p", { class: "muted small" }, `Read from ${indexerHost(net)} at epoch ${epoch}.`));
   } catch (e) {
     if (!here()) return;
     total.replaceChildren(h("strong", {}, "Locked total unavailable"), ": the locks of this token couldn't be looked up.");
     const retry = h("button", { type: "button", class: "ghost small" }, "Retry");
-    retry.addEventListener("click", () => void showLocks(net, id, r, epoch, section, total));
+    retry.addEventListener("click", reloadPage);
     body.replaceChildren(
       h("div", { class: "panel load-error inline-error", role: "status" }, h("p", {}, h("strong", {}, "Couldn't look up the locks of this token. "), h("span", { class: "muted" }, errorText(e))), h("div", { class: "row" }, retry)),
     );
@@ -117,11 +114,11 @@ async function showLocks(net: NetConfig, id: string, r: ResourceReading, epoch: 
 }
 
 /** The still-locked total of a token's locks. `complete` = every lock of the token was read. */
-function lockedTotal(locks: LoadedLock[], div: number, symbol: string | null, supply: bigint | null, complete: boolean): (Node | string)[] {
+function lockedTotal(locks: LoadedLock[], div: number | null, symbol: string | null, supply: bigint | null, complete: boolean): (Node | string)[] {
   const lockedNow = lockedNowOf(locks);
   const [lead, bold, rest] = lockedTotalLine({
     lockedNow,
-    amount: `${formatAmount(lockedNow, div)} ${symbol ?? ""}`.trim(),
+    amount: div === null ? null : tokenAmount(lockedNow, div, symbol ?? ""),
     share: lockedShare(lockedNow, supply),
     supplyTracked: supply !== null,
     found: locks.length,
@@ -136,17 +133,16 @@ function lockedNowOf(locks: LoadedLock[]): bigint {
   return locks.filter((l) => l.reading.genuine && l.status === "locked" && l.vault?.amount).reduce((sum, l) => sum + (l.vault!.amount ?? 0n), 0n);
 }
 
-/** Locks as a table: each one's holding, unlock epoch, lifecycle and verdict. */
-export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | null, epoch: number): HTMLElement {
+/** Locks as a table: each one's holding (in its own token's precision), unlock epoch, lifecycle and verdict. */
+export function lockTable(net: NetConfig, locks: LoadedLock[], epoch: number): HTMLElement {
   if (locks.length === 0) return h("p", { class: "muted" }, "No Lockbox locks found yet.");
   const rows = locks.map((l) => {
     const s = l.reading.state;
-    const d = l.resource?.divisibility ?? div ?? 0;
     return h(
       "tr",
       {},
       h("td", { "data-label": "Lock" }, link(net, `lock/${l.id}`, h("code", { title: l.id }, l.id.slice(10, 22)))),
-      h("td", { class: "num", "data-label": "Holding" }, l.vault?.amount != null ? `${formatAmount(l.vault.amount, d)} ${l.resource?.symbol ?? ""}`.trim() : "—"),
+      h("td", { class: "num", "data-label": "Holding" }, l.vault?.amount != null ? tokenAmount(l.vault.amount, l.resource?.divisibility ?? null, l.resource?.symbol ?? "") : "—"),
       h("td", { "data-label": "Unlocks" }, s ? `epoch ${s.unlockEpoch}${s.unlockEpoch > BigInt(epoch) ? ` (in ${s.unlockEpoch - BigInt(epoch)})` : ""}` : "—"),
       h("td", { class: "pills", "data-label": "Status" }, h("span", { class: "pill-group" }, statusPill(l.status), verdictPill(verdict(l)))),
     );

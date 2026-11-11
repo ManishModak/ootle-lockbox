@@ -186,7 +186,7 @@ export function loadError(net: NetConfig, what: string, id: string, path: string
   const other = Object.values(NETWORKS).find((n) => n.name !== net.name);
   const kind = loadFailure(e, id);
   const retry = h("button", { type: "button", class: "ghost" }, "Retry");
-  retry.addEventListener("click", () => window.dispatchEvent(new HashChangeEvent("hashchange")));
+  retry.addEventListener("click", reloadPage);
   const back = link(net, "", "Check another address", "button ghost");
   const body =
     kind === "absent"
@@ -209,6 +209,11 @@ export function loadError(net: NetConfig, what: string, id: string, path: string
             h("div", { class: "row" }, retry, back),
           ];
   return h("section", { class: "panel load-error" }, ...body);
+}
+
+/** Re-renders the current page from scratch (the router listens for hashchange), re-reading everything. */
+export function reloadPage() {
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
 /** The numbered steps beside a wallet flow's intro, so the page says what will happen. */

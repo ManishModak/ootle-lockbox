@@ -55,7 +55,8 @@ export interface ResourceReading {
   name: string | null;
   /** The `launched_by` metadata a Launch Commitments token carries; a claim to check, not a fact. */
   launchedBy: string | null;
-  divisibility: number;
+  /** Decimal places; null when missing or invalid, and then no amount of the token is shown. */
+  divisibility: number | null;
   totalSupply: bigint | null;
   /** Things the issuer can still do that would undo or block a lock. */
   lockRisks: string[];
@@ -251,6 +252,9 @@ export function readResource(value: Json): ResourceReading | null {
   fixed("freeze", "DenyAll", "freeze", "The issuer can freeze vaults, including a lock's vault.");
   fixed("withdraw", "AllowAll", "withdraw", "Withdrawals are restricted, so a claim could be blocked.");
   fixed("deposit", "AllowAll", "deposit", "Deposits are restricted, so claimed tokens could be refused.");
+  // Without the precision no amount can be shown, so a lock of the token can't be verified either.
+  const divisibility = validDivisibility(r.divisibility) ? r.divisibility : null;
+  if (divisibility === null) unreadable.push("The token's precision (decimal places) could not be read, so its amounts can't be shown.");
   if (!("auth_hook" in r)) unreadable.push("The token's transfer-hook setting could not be read.");
   else if (r.auth_hook !== null) lockRisks.push("A hook contract can veto transfers.");
   else {
@@ -275,7 +279,7 @@ export function readResource(value: Json): ResourceReading | null {
     symbol: str(md.SYMBOL) ?? str(md.symbol),
     name: str(md.name) ?? str(md.NAME),
     launchedBy: str(md.launched_by),
-    divisibility: typeof r.divisibility === "number" ? r.divisibility : 0,
+    divisibility,
     totalSupply: r.total_supply === null ? null : toBigInt(r.total_supply),
     lockRisks,
     unreadable,
@@ -292,6 +296,26 @@ export function tokenLockSafe(r: Pick<ResourceReading, "lockRisks" | "unreadable
 export function lockStatus(state: LockState, currentEpoch: number): LockStatus {
   if (state.claimed) return "claimed";
   return BigInt(currentEpoch) < state.unlockEpoch ? "locked" : "claimable";
+}
+
+/** The engine's limit on a token's decimal places (`MAX_DIVISIBILITY`). */
+export const MAX_DIVISIBILITY = 18;
+
+/** True for a precision the engine allows: an integer from 0 to 18. */
+export function validDivisibility(x: unknown): x is number {
+  return Number.isInteger(x) && (x as number) >= 0 && (x as number) <= MAX_DIVISIBILITY;
+}
+
+/** What pages show for an amount of a token whose precision couldn't be read. */
+export const AMOUNT_UNKNOWN = "amount unknown (precision unreadable)";
+
+/**
+ * An on-chain amount with its symbol, for the proof pages. With the precision unknown it says so
+ * instead of guessing, so a missing precision never shows a wrong amount (zero is zero at any precision).
+ */
+export function tokenAmount(amount: bigint, divisibility: number | null, symbol = ""): string {
+  if (divisibility === null && amount !== 0n) return AMOUNT_UNKNOWN;
+  return `${formatAmount(amount, divisibility ?? 0)} ${symbol}`.trim();
 }
 
 /** Amount in atomic units -> decimal text, exact (no floating point). */

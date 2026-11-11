@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "./config";
-import { dryRun, engineVerdict, forgetEarlierTransaction, requireWalletNetwork, settleEarlier, submit, TxBlocked, txHash } from "./wallet";
+import { balances, dryRun, engineVerdict, forgetEarlierTransaction, requireWalletNetwork, settleEarlier, submit, TxBlocked, txHash } from "./wallet";
 
 const net = NETWORKS.esmeralda;
 const HASH = "c9".repeat(32);
@@ -284,5 +284,15 @@ describe("requireWalletNetwork", () => {
       throw new Error("No wallet set up");
     });
     await expect(requireWalletNetwork(failing, NETWORKS.esmeralda)).rejects.toThrow("No wallet set up");
+  });
+});
+
+describe("balances", () => {
+  // A typed "1.5" for a token without a known precision would become 15 units, so it isn't offered.
+  it("leaves out a balance whose precision is missing or invalid", async () => {
+    const b = (resourceAddress: string, divisibility: unknown) => ({ resourceAddress, kind: "Fungible", amount: "100", divisibility, symbol: null, name: null });
+    const list = [b("resource_ok", 6), b("resource_zero", 0), b("resource_missing", undefined), b("resource_bad", 19)];
+    const wallet = { isTariWallet: true, request: async () => list } as any;
+    expect((await balances(wallet)).map((x) => x.resourceAddress)).toEqual(["resource_ok", "resource_zero"]);
   });
 });

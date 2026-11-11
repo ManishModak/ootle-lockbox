@@ -54,13 +54,14 @@ export async function loadLock(net: NetConfig, id: string, epoch: number): Promi
 }
 
 /**
- * A lock is "verified" only when the lock is genuine, readable, and the token can't undo it. An
- * issuer power makes it "unverified"; token rules that couldn't be read make it "unknown".
+ * A lock is "verified" only when the lock is genuine, readable, and the token can't undo it. A
+ * failed lock check or an issuer power makes it "unverified"; a lock header field or token rule
+ * that couldn't be read makes it "unknown".
  */
 export function verdict(l: LoadedLock): "verified" | "unverified" | "unknown" {
-  if (!l.reading.genuine) return "unverified";
-  if (!l.vault || !l.resource) return "unknown";
-  if (l.resource.lockRisks.length > 0) return "unverified";
+  if (l.reading.provenance === "no") return "unverified";
+  if (l.resource && l.resource.lockRisks.length > 0) return "unverified";
+  if (!l.reading.genuine || !l.vault || !l.resource) return "unknown";
   return tokenLockSafe(l.resource) ? "verified" : "unknown";
 }
 

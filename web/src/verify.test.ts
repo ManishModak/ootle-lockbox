@@ -3,7 +3,9 @@ import lockFixture from "./fixtures/esmeralda-lock.json";
 import vaultFixture from "./fixtures/esmeralda-lock-vault.json";
 import tariFixture from "./fixtures/esmeralda-tari-resource.json";
 import bigLockFixture from "./fixtures/esmeralda-launch-lock.json";
+import launchTokenFixture from "./fixtures/esmeralda-launch-token.json";
 import {
+  AMOUNT_UNKNOWN,
   formatAmount,
   lockedShare,
   lockStatus,
@@ -11,6 +13,8 @@ import {
   readLock,
   readResource,
   readVault,
+  tokenAmount,
+  tokenLockSafe,
 } from "./verify";
 
 // Real Esmeralda data: the demo lock (1 tTARI, unlock epoch 12932, claimed at 12934).
@@ -170,6 +174,43 @@ describe("readResource", () => {
     const r = readResource(mintable);
     expect(r?.lockRisks).toEqual([]);
     expect(r?.notes[0]).toContain("minted");
+  });
+});
+
+// A token's precision decides every amount shown; without it a lock of 50,000 would read as 50,000 × 10^18.
+describe("token precision", () => {
+  const LOCKED = 50_000n * 10n ** 18n; // the real launch lock of 50,000 LCDEMO
+  const withPrecision = (d: unknown) => {
+    const t = clone(launchTokenFixture) as { Resource: Record<string, unknown> };
+    if (d === undefined) delete t.Resource.divisibility;
+    else t.Resource.divisibility = d;
+    return readResource(t)!;
+  };
+
+  it("reads the real 18-decimal token", () => {
+    const r = withPrecision(18);
+    expect(r.divisibility).toBe(18);
+    expect(tokenLockSafe(r)).toBe(true);
+    expect(tokenAmount(LOCKED, r.divisibility, "LCDEMO")).toBe("50,000 LCDEMO");
+  });
+
+  it("treats a missing or invalid precision as unreadable, never as 0 decimals", () => {
+    for (const bad of [undefined, null, -1, 19, 1.5, "18"]) {
+      const r = withPrecision(bad);
+      expect(r.divisibility).toBeNull();
+      expect(r.lockRisks).toEqual([]);
+      expect(r.unreadable).toEqual(["The token's precision (decimal places) could not be read, so its amounts can't be shown."]);
+      expect(tokenLockSafe(r)).toBe(false);
+      expect(tokenAmount(LOCKED, r.divisibility, "LCDEMO")).toBe(AMOUNT_UNKNOWN);
+      expect(tokenAmount(0n, r.divisibility, "LCDEMO")).toBe("0 LCDEMO"); // a claimed lock's empty vault
+    }
+  });
+
+  it("keeps genuine zero-decimal tokens", () => {
+    const r = withPrecision(0);
+    expect(r.divisibility).toBe(0);
+    expect(tokenLockSafe(r)).toBe(true);
+    expect(tokenAmount(50_000n, r.divisibility, "WHOLE")).toBe("50,000 WHOLE");
   });
 });
 

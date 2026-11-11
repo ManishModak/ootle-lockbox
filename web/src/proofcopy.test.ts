@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LaunchProof } from "./launch";
 import type { LoadedLock } from "./lockdata";
 import { IndexerError } from "./indexer";
-import { factText, launchVerdict, loadFailure, lockChecks, lockedTotalLine, notesLine, stillLockedText, tokenVerdict, type LaunchFactName } from "./proofcopy";
+import { factText, launchVerdict, loadFailure, lockChecks, lockedTotalLine, lockReadGaps, notesLine, stillLockedText, tokenVerdict, type LaunchFactName } from "./proofcopy";
 import { verdict } from "./lockdata";
 import { readResource, type Fact } from "./verify";
 import tariFixture from "./fixtures/esmeralda-tari-resource.json";
@@ -73,6 +73,7 @@ const proof = (over: Partial<LaunchProof>): LaunchProof => ({
   issued: "yes",
   lockedAtLaunch: "yes",
   stillLocked: 0n,
+  lockFacts: new Map(),
   record: {
     resource: "resource_x",
     supply: 1_000_000n,
@@ -193,9 +194,65 @@ describe("lockedTotalLine", () => {
     expect(lockedTotalLine({ ...base, complete: false })[1]).toBe("Locked total unavailable");
   });
 
+  it("never shows an amount when the token's precision couldn't be read", () => {
+    const line = lockedTotalLine({ ...base, lockedNow: 5n, amount: null, open: 0 });
+    expect(line[1]).toBe("Locked total unavailable");
+    expect(line.join("")).toMatch(/precision couldn't be read/);
+  });
+
   it("shows a positive total with its share, as a lower bound when incomplete", () => {
     const some = { ...base, lockedNow: 5n, amount: "5 LCDEMO", share: "0.50%" };
     expect(lockedTotalLine(some).join("")).toBe("5 LCDEMO still locked in Lockbox (0.50% of supply). Counts only genuine locks before their unlock epoch.");
     expect(lockedTotalLine({ ...some, complete: false }).join("")).toMatch(/^At least 5 LCDEMO .*\(at least 0.50% of supply\)/);
+  });
+});
+
+/** A loaded lock with the given header provenance; `state` and vault present, so only provenance varies. */
+const loaded = (provenance: Fact, status: "locked" | "claimable" = "locked", amount: bigint | null = 5n): LoadedLock =>
+  ({
+    id: "component_x",
+    reading: { checks: [], genuine: provenance === "yes", provenance, state: { unlockEpoch: 100n } },
+    vault: { resource: "resource_x", amount, nftCount: null },
+    resource: { lockRisks: [], unreadable: [], notes: [], divisibility: 0 },
+    status,
+    indexerVerified: true,
+  }) as unknown as LoadedLock;
+
+// A lock whose header field is missing might be genuine; the token page must not call the total zero.
+describe("lockReadGaps", () => {
+  it("counts a lock of unknown provenance as unread, so a zero total is unavailable", () => {
+    const gaps = lockReadGaps([loaded("unknown")], true);
+    expect(gaps).toEqual({ failed: 1, complete: false });
+    const line = lockedTotalLine({ lockedNow: 0n, amount: "0 X", share: null, supplyTracked: false, found: 1, open: 0, complete: gaps.complete });
+    expect(line.join("")).toBe("Locked total unavailable: some locks of this token couldn't be read, and none of the others is still locked.");
+  });
+
+  it("keeps a confirmed total as a lower bound beside a lock of unknown provenance", () => {
+    const gaps = lockReadGaps([loaded("yes"), loaded("unknown")], true);
+    expect(gaps).toEqual({ failed: 1, complete: false });
+    expect(lockedTotalLine({ lockedNow: 5n, amount: "5 X", share: null, supplyTracked: false, found: 2, open: 0, complete: gaps.complete })[0]).toBe("At least ");
+  });
+
+  it("is complete only when every listed lock was read", () => {
+    expect(lockReadGaps([loaded("yes"), loaded("no")], true)).toEqual({ failed: 0, complete: true });
+    expect(lockReadGaps([loaded("yes"), null], true)).toEqual({ failed: 1, complete: false });
+    expect(lockReadGaps([loaded("yes", "locked", null)], true)).toEqual({ failed: 1, complete: false });
+    expect(lockReadGaps([loaded("yes")], false)).toEqual({ failed: 0, complete: false });
+  });
+});
+
+describe("verdict", () => {
+  it("is amber unknown, never verified, when a lock header field couldn't be read", () => {
+    expect(verdict(loaded("unknown"))).toBe("unknown");
+    expect(verdict(loaded("no"))).toBe("unverified");
+    expect(verdict(loaded("yes"))).toBe("verified");
+  });
+
+  it("never verifies a lock whose token precision couldn't be read", () => {
+    const t = JSON.parse(JSON.stringify(tariFixture)) as { Resource: Record<string, unknown> };
+    delete t.Resource.divisibility;
+    const l = { ...loaded("yes"), resource: readResource(t) } as LoadedLock;
+    expect(verdict(l)).toBe("unknown");
+    expect(lockChecks(l).checks.at(-1)).toMatchObject({ ok: false, unknown: true });
   });
 });

@@ -144,7 +144,7 @@ async function loadRecent(net: NetConfig, section: HTMLElement) {
     const [epoch, { events }] = await Promise.all([currentEpoch(net), lockCreatedEvents(net, 2)]);
     const locks = await mapLimit(events.slice(0, RECENT), 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
     section.lastElementChild?.remove();
-    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), null, epoch));
+    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), epoch));
   } catch (e) {
     section.lastElementChild?.replaceWith(notice("warn", `Could not load recent locks: ${errorText(e)}`));
   }

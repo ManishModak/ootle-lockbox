@@ -126,6 +126,8 @@ describe("launchProof", () => {
     expect(facts(swapped).lockedAtLaunch).toBe("no");
     const otherLaunch = tampered((r) => (r.locks.get(LOCK2)!.lock.Component.body.state[5] = "launch component_" + "55".repeat(32)));
     expect(facts(otherLaunch).lockedAtLaunch).toBe("no");
+    // The table names which lock failed, even though it is still a genuine Lockbox lock.
+    expect(Object.fromEntries(prove(otherLaunch).lockFacts)).toEqual({ [LOCK1]: "yes", [LOCK2]: "no" });
   });
 
   it("is unknown, never a pass, when a lock or the record can't be read", () => {

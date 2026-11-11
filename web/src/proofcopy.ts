@@ -6,7 +6,7 @@
 import { IndexerError } from "./indexer";
 import type { LaunchProof } from "./launch";
 import type { LoadedLock } from "./lockdata";
-import { formatAmount, tokenLockSafe, type Check, type Fact, type ResourceReading } from "./verify";
+import { tokenAmount, tokenLockSafe, type Check, type Fact, type ResourceReading } from "./verify";
 
 /**
  * How a page that failed to load words it: "absent" only when the address the page asked for is
@@ -54,13 +54,26 @@ export function tokenVerdict(r: Pick<ResourceReading, "lockRisks" | "unreadable"
 }
 
 /**
+ * How many of a token's listed locks the token page couldn't use, and whether it read them all.
+ * A lock counts as unread when it failed to load, its state couldn't be read, its provenance is
+ * unknown (a header field is missing, so it might be genuine), or it is a genuine lock before its
+ * epoch whose balance couldn't be read. `allListed` = every lock of the token was listed.
+ */
+export function lockReadGaps(loaded: (LoadedLock | null)[], allListed: boolean): { failed: number; complete: boolean } {
+  const unread = (l: LoadedLock | null) =>
+    l === null || l.reading.state === null || l.reading.provenance === "unknown" || (l.reading.genuine && l.status === "locked" && l.vault?.amount == null);
+  const failed = loaded.filter(unread).length;
+  return { failed, complete: allListed && failed === 0 };
+}
+
+/**
  * The token page's still-locked line as [lead, bold, rest]. `found` locks were read, `open` of
  * them unlocked or claimed; `complete` = every lock of the token was read. A zero total says why
- * instead of showing "0.00%".
+ * instead of showing "0.00%". `amount` is null when the token's precision couldn't be read.
  */
 export function lockedTotalLine(a: {
   lockedNow: bigint;
-  amount: string;
+  amount: string | null;
   share: string | null;
   supplyTracked: boolean;
   found: number;
@@ -68,6 +81,7 @@ export function lockedTotalLine(a: {
   complete: boolean;
 }): [string, string, string] {
   if (a.lockedNow > 0n) {
+    if (a.amount === null) return ["", "Locked total unavailable", ": the token's precision couldn't be read, so no amount can be shown."];
     const share = a.share ? ` (${a.complete ? "" : "at least "}${a.share} of supply)` : a.supplyTracked ? "" : " (supply not tracked, so no share)";
     return [a.complete ? "" : "At least ", a.amount, ` still locked in Lockbox${share}. Counts only genuine locks before their unlock epoch.`];
   }
@@ -159,14 +173,14 @@ export function launchVerdict(p: LaunchProof): { kind: "ok" | "warn" | "bad"; ti
 
 /**
  * "Still locked now" as an amount out of what was locked at launch, plus why it is that amount.
- * Null when the live amount couldn't be read.
+ * Null when the live amount or the token's precision couldn't be read.
  */
-export function stillLockedText(p: LaunchProof, div: number, sym: string, epoch: number): { amount: string; note: string } | null {
-  if (p.stillLocked === null || !p.record) return null;
+export function stillLockedText(p: LaunchProof, div: number | null, sym: string, epoch: number): { amount: string; note: string } | null {
+  if (p.stillLocked === null || !p.record || div === null) return null;
   const launched = p.record.locks.reduce((s, l) => s + l.amount, 0n);
   const allReached = p.record.locks.every((l) => BigInt(epoch) >= l.unlockEpoch);
   return {
-    amount: `${formatAmount(p.stillLocked, div)} of ${formatAmount(launched, div)} ${sym}`,
+    amount: `${tokenAmount(p.stillLocked, div)} of ${tokenAmount(launched, div, sym)}`,
     note: allReached ? "every launch lock has reached its unlock epoch" : "each lock opens at its unlock epoch; then only its beneficiary can claim",
   };
 }

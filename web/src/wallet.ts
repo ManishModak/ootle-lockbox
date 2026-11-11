@@ -17,6 +17,7 @@ import type { Instruction, InstructionArg } from "@tari-project/ootle";
 import type { NetConfig } from "./config";
 import type { LaunchInput } from "./newlaunch";
 import { isValidPublicKey, MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary } from "./newlock";
+import { validDivisibility } from "./verify";
 
 interface TariProvider {
   isTariWallet?: boolean;
@@ -70,9 +71,13 @@ export async function walletKey(p: TariProvider, net: NetConfig): Promise<string
   return typeof address === "string" ? parseBeneficiary(address, NETWORK_BYTE[net.name]) : null;
 }
 
+/**
+ * The wallet's lockable public balances. One without a valid precision is left out: amounts typed
+ * for it couldn't be converted safely (1.5 would become 15 units).
+ */
 export async function balances(p: TariProvider): Promise<Balance[]> {
   const list = (await p.request({ method: "tari_getBalances" })) as Balance[];
-  return list.filter((b) => BigInt(b.amount || "0") > 0n && b.kind !== "NonFungible");
+  return list.filter((b) => BigInt(b.amount || "0") > 0n && b.kind !== "NonFungible" && validDivisibility(b.divisibility));
 }
 
 /** account.withdraw -> Lockbox::lock(tokens, epoch, beneficiary, memo). */
