@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { lockLengthTarget, toLocalInput } from "./locklength";
+
+// Tests run in Node; the app has no Node types, so declare the one bit used here.
+declare const process: { env: Record<string, string | undefined> };
 
 // Local wall-clock times, so the tests hold in any timezone.
 const at = (y: number, m: number, d: number, hh = 10, mm = 30) => new Date(y, m - 1, d, hh, mm).getTime();
@@ -28,6 +31,39 @@ describe("lockLengthTarget", () => {
   it("is always later than now", () => {
     const now = at(2026, 11, 11);
     for (const l of ["1w", "1m", "3m", "6m", "1y", "2y"] as const) expect(lockLengthTarget(l, now)).toBeGreaterThan(now);
+  });
+});
+
+describe("lockLengthTarget across timezones", () => {
+  // Node re-reads TZ when it is assigned, so each test can run on another zone's calendar.
+  const original = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = original;
+  });
+
+  it("does not drift through a DST gap on the way (Lord Howe, first Sunday of October 2028)", () => {
+    process.env.TZ = "Australia/Lord_Howe";
+    // 1 Oct 2028 02:00-02:30 doesn't exist there; month arithmetic must not pass through it.
+    expect(lockLengthTarget("1m", at(2028, 10, 31, 2, 15))).toBe(Date.parse("2028-11-30T02:15"));
+    // A target inside the gap gives the same time as typing it.
+    expect(lockLengthTarget("1w", at(2028, 9, 24, 2, 15))).toBe(Date.parse("2028-10-01T02:15"));
+  });
+
+  for (const tz of ["Australia/Lord_Howe", "America/New_York", "Asia/Kolkata", "UTC"]) {
+    it(`keeps month ends and leap days in ${tz}`, () => {
+      process.env.TZ = tz;
+      expect(lockLengthTarget("1m", at(2027, 1, 31, 2, 15))).toBe(Date.parse("2027-02-28T02:15"));
+      expect(lockLengthTarget("1m", at(2028, 1, 31, 2, 15))).toBe(Date.parse("2028-02-29T02:15"));
+      expect(lockLengthTarget("1y", at(2028, 2, 29, 2, 15))).toBe(Date.parse("2029-02-28T02:15"));
+      expect(lockLengthTarget("6m", at(2026, 8, 31, 2, 15))).toBe(Date.parse("2027-02-28T02:15"));
+    });
+  }
+
+  it("drops seconds, so the target matches what the date input shows", () => {
+    const now = new Date(2026, 10, 11, 23, 5, 37, 250).getTime();
+    const t = lockLengthTarget("1y", now);
+    expect(Date.parse(toLocalInput(t))).toBe(t);
+    expect(toLocalInput(t)).toBe("2027-11-11T23:05");
   });
 });
 

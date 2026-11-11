@@ -25,17 +25,32 @@ export function h(tag: string, attrs: Attrs = {}, ...children: Child[]): HTMLEle
 }
 
 let pageNumber = 0;
+/** True between a route change and its page being drawn, while the old page may still be clicked. */
+let between = false;
 
-/** Called by the router each time it renders a page. */
-export function startPage() {
+/**
+ * Called by the router the moment the route changes. The page being left stops being "this page"
+ * at once, even if its replacement is drawn later (a view transition runs `show` after a frame),
+ * and a flow started on it in that gap is never "on this page". The returned function runs `show`
+ * only if no newer navigation has started meanwhile.
+ */
+export function beginPage(show: () => void): () => void {
   pageNumber++;
+  between = true;
+  const n = pageNumber;
+  return () => {
+    if (n !== pageNumber) return;
+    between = false;
+    show();
+  };
 }
 
 /**
- * Captures the page being shown. The returned check turns false once the router renders another
- * page, so a flow started here never sends, navigates or reloads after the user has left.
+ * Captures the page being shown. The returned check turns false once the route changes, so a flow
+ * started here never sends, navigates or reloads after the user has left.
  */
 export function onThisPage(): () => boolean {
+  if (between) return () => false;
   const n = pageNumber;
   return () => n === pageNumber;
 }

@@ -26,10 +26,11 @@ export function unlockPicker(net: NetConfig, epoch: number, id: string): UnlockP
   const how = h("p", { class: "muted small" });
   const details = h("details", { class: "unlock-how", hidden: true }, h("summary", {}, "How is this worked out?"), how);
 
-  // A quick length is fixed when picked, like a typed date; "Pick a date" starts from it.
-  let presetTarget = Number.NaN;
+  // One target, at the date input's precision: a quick length writes its time into the input
+  // (fixed when picked, like a typed date), typing writes it too, and the radios only decide
+  // whether the input shows. So "Pick a date" always starts from the current choice.
   const chosen = () => (chips.querySelector("input:checked") as HTMLInputElement | null)?.value ?? "";
-  const target = () => (chosen() === "date" ? (date.value ? Date.parse(date.value) : Number.NaN) : chosen() ? presetTarget : Number.NaN);
+  const target = () => (chosen() && date.value ? Date.parse(date.value) : Number.NaN);
 
   const update = () => {
     const t = target();
@@ -55,9 +56,7 @@ export function unlockPicker(net: NetConfig, epoch: number, id: string): UnlockP
 
   chips.addEventListener("change", () => {
     const v = chosen();
-    if (v === "date") {
-      if (!date.value && Number.isFinite(presetTarget)) date.value = toLocalInput(presetTarget);
-    } else presetTarget = lockLengthTarget(v as LockLength, Date.now());
+    if (v !== "date") date.value = toLocalInput(lockLengthTarget(v as LockLength, Date.now()));
     dateField.hidden = v !== "date";
     update();
   });

@@ -6,6 +6,9 @@
  * Keyboard (menu button pattern): Enter, Space or Down opens it on the current network, Up on the
  * last; Up/Down/Home/End move; Enter or Space picks; Escape closes and returns focus to the
  * button; Tab or a click outside closes it.
+ *
+ * While open it listens on the document for outside presses, so the router calls `dispose()`
+ * before it replaces the header.
  */
 import { NETWORKS, type NetConfig, type NetworkName } from "./config";
 import { checkIcon, h } from "./ui";
@@ -20,7 +23,13 @@ const ORDER: NetworkName[] = ["mainnet", "esmeralda"];
 
 const dot = (name: NetworkName) => h("span", { class: `net-dot net-dot-${name}`, "aria-hidden": "true" });
 
-export function networkMenu(current: NetConfig): HTMLElement {
+export interface NetworkMenu {
+  el: HTMLElement;
+  /** Closes the menu and drops its document listener; call before the header is replaced. */
+  dispose(): void;
+}
+
+export function networkMenu(current: NetConfig): NetworkMenu {
   const nets = ORDER.map((n) => NETWORKS[n]);
   const button = h(
     "button",
@@ -45,10 +54,8 @@ export function networkMenu(current: NetConfig): HTMLElement {
   const focusItem = (i: number) => items[(i + items.length) % items.length].focus();
   const currentIndex = () => Math.max(0, nets.findIndex((n) => n.name === current.name));
 
-  // A press outside closes the menu; also drops itself once the header is re-rendered.
   const outside = (e: PointerEvent) => {
-    if (!root.isConnected) document.removeEventListener("pointerdown", outside);
-    else if (!root.contains(e.target as Node)) close(false);
+    if (!root.contains(e.target as Node)) close(false);
   };
   function open(focusAt: number) {
     if (!isOpen()) {
@@ -97,5 +104,5 @@ export function networkMenu(current: NetConfig): HTMLElement {
     const to = e.relatedTarget as Node | null;
     if (to && !root.contains(to)) close(false);
   });
-  return root;
+  return { el: root, dispose: () => close(false) };
 }

@@ -4,8 +4,8 @@
  */
 import "./style.css";
 import { DEFAULT_NETWORK, NETWORKS, REPO_URL, type NetConfig, type NetworkName } from "./config";
-import { networkMenu } from "./netmenu";
-import { h, logo, reducedMotion, startPage } from "./ui";
+import { networkMenu, type NetworkMenu } from "./netmenu";
+import { beginPage, h, logo, reducedMotion } from "./ui";
 import { createView } from "./views/create";
 import { homeView } from "./views/home";
 import { launchView } from "./views/launch";
@@ -26,11 +26,11 @@ function parseRoute(): Route {
   return { net, page, id };
 }
 
-function header(net: NetConfig): HTMLElement {
+function header(route: Route, menu: NetworkMenu): HTMLElement {
   // Only the form pages themselves are "current": a launch proof shares the "launch" route but isn't the form.
-  const here = parseRoute();
+  const { net } = route;
   const navLink = (page: string, text: string) =>
-    h("a", { href: `#/${net.name}/${page}`, "aria-current": here.page === page && here.id === "" ? "page" : undefined }, text);
+    h("a", { href: `#/${net.name}/${page}`, "aria-current": route.page === page && route.id === "" ? "page" : undefined }, text);
   return h(
     "header",
     { class: "top" },
@@ -39,7 +39,7 @@ function header(net: NetConfig): HTMLElement {
       { class: "top-inner" },
       h("a", { href: `#/${net.name}`, class: "brand" }, logo(), "Lockbox"),
       h("nav", { "aria-label": "Main" }, navLink("create", "Create a lock"), navLink("launch", "Launch a token")),
-      networkMenu(net),
+      menu.el,
     ),
   );
 }
@@ -60,21 +60,29 @@ function footer(): HTMLElement {
   );
 }
 
+/** The header's network menu on screen, disposed before the header is replaced. */
+let menu: NetworkMenu | undefined;
+
 /**
- * Shows the page for the current hash. The swap itself is synchronous (each view puts up its
- * frame and loading placeholders before its first await), so a route change can cross-fade with
- * the View Transitions API where supported. The first render and reduced motion swap plainly.
+ * Shows the page for the current hash. The route is read and the old page invalidated right away
+ * (so an in-flight flow there can't go on to ask the wallet for anything), then the page is
+ * swapped. The swap itself is synchronous (each view puts up its frame and loading placeholders
+ * before its first await), so a route change can cross-fade with the View Transitions API where
+ * supported; a swap superseded by a newer navigation does nothing. The first render and reduced
+ * motion swap plainly.
  */
 function render(animate: boolean) {
-  const swap = () => {
-    startPage();
-    const route = parseRoute();
+  const route = parseRoute();
+  const swap = beginPage(() => {
+    menu?.dispose();
+    menu = networkMenu(route.net);
     const main = h("main");
-    document.body.replaceChildren(header(route.net), main, footer());
+    document.body.replaceChildren(header(route, menu), main, footer());
     window.scrollTo(0, 0);
     void showPage(route, main);
-  };
-  if (animate && document.startViewTransition && !reducedMotion()) document.startViewTransition(swap);
+  });
+  // A transition skipped by a newer one rejects `ready`; that's expected, not an error.
+  if (animate && document.startViewTransition && !reducedMotion()) document.startViewTransition(swap).ready.catch(() => {});
   else swap();
 }
 
