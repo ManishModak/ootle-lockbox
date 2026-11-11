@@ -1,5 +1,5 @@
 /** Home: what Lockbox is, a lookup box, and the most recent locks on this network. */
-import { REPO_URL, type NetConfig } from "../config";
+import { NETWORKS, REPO_URL, type NetConfig } from "../config";
 import { currentEpoch, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, type LoadedLock } from "../lockdata";
 import { errorText, h, link, loading, notice } from "../ui";
@@ -7,13 +7,24 @@ import { lockTable } from "./token";
 
 const RECENT = 15;
 
-export function notPublishedNotice(net: NetConfig): HTMLElement {
-  return notice(
-    "info",
-    h("strong", {}, `Lockbox is not on ${net.label} yet. `),
-    "Ootle mainnet opens on 11 November 2026 and Lockbox will be published there the same day. Until then, try it on ",
-    h("a", { href: "#/esmeralda" }, "Esmeralda testnet"),
-    ".",
+const TESTNET = NETWORKS.esmeralda;
+
+/** "Lockbox's mainnet template isn't published yet." as a notice, for a network without the template. */
+function notPublishedText(net: NetConfig, product: string): HTMLElement {
+  const where = net.name === "mainnet" ? "mainnet" : net.label;
+  return notice("info", h("strong", {}, `${product}${product.endsWith("s") ? "'" : "'s"} ${where} template isn't published yet.`));
+}
+
+/**
+ * The not-published notice plus the next step: the same page on the testnet. `path` is the page's
+ * route without the network ("create", "launch", "launch/<id>").
+ */
+export function notPublishedNotice(net: NetConfig, product = "Lockbox", path = "", action = `Try on ${TESTNET.label}`): HTMLElement {
+  return h(
+    "div",
+    {},
+    notPublishedText(net, product),
+    h("div", { class: "row" }, h("a", { href: `#/${TESTNET.name}/${path}`, class: "button" }, action)),
   );
 }
 
@@ -21,7 +32,7 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
   const lookup = h("input", {
     type: "text",
     name: "q",
-    placeholder: "component_… (a lock) or resource_… (a token)",
+    placeholder: "component_… or resource_…",
     "aria-label": "Lock or token address",
     autocomplete: "off",
     spellcheck: "false",
@@ -36,35 +47,38 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
     else lookupError.textContent = "Paste a full lock (component_…) or token (resource_…) address.";
   });
 
+  const howItWorks = h("button", { type: "button", class: "ghost", onclick: () => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" }) }, "How it works");
+  // Without the template here, the first action is the testnet, where both templates are published.
+  const actions = net.lockboxTemplate
+    ? [h("div", { class: "row" }, link(net, "create", "Create a lock", "button"), howItWorks)]
+    : [notPublishedText(net, "Lockbox"), h("div", { class: "row" }, h("a", { href: `#/${TESTNET.name}`, class: "button" }, `Try on ${TESTNET.label}`), howItWorks)];
   root.append(
     h(
       "section",
       { class: "hero" },
-      h("h1", {}, "Lock tokens until a date.", h("br"), "Anyone can check."),
+      h("h1", {}, "Time-lock tokens on Tari Ootle.", h("br"), "Anyone can check."),
       h(
         "div",
         { class: "hero-copy" },
         h(
           "p",
           { class: "lede" },
-          "Lockbox is a free time-lock on Tari Ootle. Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early, and every lock has a public proof page.",
+          "Lock tokens for a beneficiary until an epoch. Nobody, including you, can take them out early unless the token's own rules allow it — every lock's public proof page checks. No Lockbox fee; network fees apply.",
         ),
-        h("div", { class: "row" }, link(net, "create", "Create a lock", "button"), h("button", { type: "button", class: "ghost", onclick: () => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" }) }, "How it works")),
+        ...actions,
       ),
       h(
         "section",
         { class: "panel check-panel", "aria-labelledby": "check-title" },
         h("h2", { id: "check-title" }, "Check a lock or a token"),
-        h("p", { class: "muted small" }, "Paste an address to open its proof page."),
+        h("p", { class: "muted small" }, "Paste a lock (component_…) or token (resource_…) address to open its proof page."),
         form,
         lookupError,
       ),
     ),
   );
 
-  if (!net.lockboxTemplate) {
-    root.append(notPublishedNotice(net));
-  } else {
+  if (net.lockboxTemplate) {
     const recent = h("section", { class: "recent" }, h("h2", {}, "Recent locks"), loading());
     root.append(recent);
     void loadRecent(net, recent);
@@ -73,11 +87,11 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
   root.append(
     h(
       "section",
-      { class: "launch-band" },
+      { class: "launch-band", "aria-labelledby": "launch-band-title" },
       h(
         "div",
         {},
-        h("h2", {}, "Launch a token"),
+        h("h2", { id: "launch-band-title" }, "Launch Commitments"),
         h(
           "p",
           {},
@@ -126,7 +140,7 @@ async function loadRecent(net: NetConfig, section: HTMLElement) {
     const [epoch, { events }] = await Promise.all([currentEpoch(net), lockCreatedEvents(net, 2)]);
     const locks = await mapLimit(events.slice(0, RECENT), 4, (e) => loadLock(net, e.lock, epoch).catch(() => null));
     section.lastElementChild?.remove();
-    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), null, null, epoch, true));
+    section.append(lockTable(net, locks.filter((x): x is LoadedLock => x !== null), null, epoch));
   } catch (e) {
     section.lastElementChild?.replaceWith(notice("warn", `Could not load recent locks: ${errorText(e)}`));
   }

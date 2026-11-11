@@ -2,9 +2,10 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, getSubstate, indexerHost, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, verdict, type LoadedLock } from "../lockdata";
-import { addressLine, h, link, loadError, loading, notice, pill, verdictPanel } from "../ui";
+import { notesLine } from "../proofcopy";
+import { addressLine, h, link, loadError, loading, notice, proofTitle, statusPill, verdictPanel, verdictPill } from "../ui";
 import { formatAmount, lockedShare, readResource } from "../verify";
-import { checkList } from "./lock";
+import { checkList, notesList } from "./lock";
 
 // Upper bounds on reads per page view; past them the total is shown as a lower bound.
 const MAX_EVENT_PAGES = 20;
@@ -21,38 +22,53 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
       return;
     }
     const title = r.name ?? r.symbol ?? "Token";
-    root.append(
-      h("h1", {}, title, r.symbol && r.name ? h("span", { class: "muted" }, ` (${r.symbol})`) : null),
+    const note = notesLine(r.notes, "locks");
+    // Filled in once the locks are read: the live locked amount sits right under the verdict.
+    const total = h("p", { class: "locked-total" }, h("span", { class: "muted" }, "Counting what is still locked…"));
+    const parts: (HTMLElement | null)[] = [
+      proofTitle(h("h1", {}, title, r.symbol && r.name ? h("span", { class: "muted" }, ` (${r.symbol})`) : null)),
       h("p", { class: "title-sub" }, addressLine(id)),
-      h(
-        "div",
-        {},
-        r.launchedBy && net.launchTemplate
-          ? notice("info", "This token says it was launched with Launch Commitments. ", link(net, `launch/${id}`, "Check its launch proof"), ".")
-          : null,
-      ),
+      r.launchedBy && net.launchTemplate
+        ? notice("info", "This token says it was launched with Launch Commitments. ", link(net, `launch/${id}`, "Check its launch proof"), ".")
+        : null,
+      r.lockRisks.length === 0
+        ? verdictPanel(
+            "ok",
+            "The issuer can't undo a lock",
+            "This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.",
+            [note ? h("p", { class: "verdict-note" }, note) : null],
+          )
+        : verdictPanel("bad", "The issuer can undo a lock", "Locks of this token are never marked verified.", [note ? h("p", { class: "verdict-note" }, note) : null]),
+      total,
+      r.lockRisks.length || r.notes.length
+        ? h(
+            "section",
+            { class: "panel checks-panel" },
+            r.lockRisks.length ? h("h2", {}, "What the issuer can still do") : null,
+            r.lockRisks.length ? checkList(r.lockRisks.map((x) => ({ ok: false, label: x }))) : null,
+            r.notes.length ? notesList(r.notes, "Doesn't affect locks.") : null,
+          )
+        : null,
+    ];
+    root.append(...parts.filter((x): x is HTMLElement => x !== null));
+
+    const section = h("section", { class: "recent" }, h("h2", {}, "Locks of this token"), loading("Looking for locks…"));
+    const details = h(
+      "section",
+      {},
+      h("h2", {}, "Token details"),
       h(
         "dl",
         { class: "stats" },
-        h("dt", {}, "Type"),
-        h("dd", {}, r.type),
         h("dt", {}, "Supply"),
         h("dd", {}, r.totalSupply === null ? "not tracked" : `${formatAmount(r.totalSupply, r.divisibility)}`),
+        h("dt", {}, "Type"),
+        h("dd", {}, r.type),
         h("dt", {}, "Decimals"),
         h("dd", {}, String(r.divisibility)),
       ),
-      h("h2", {}, "Can the issuer undo a lock?"),
-      r.lockRisks.length === 0
-        ? verdictPanel("ok", "No", "This token has no owner and its recall, freeze, withdraw and deposit rules are fixed, so locks of it can be verified.")
-        : verdictPanel("bad", "Yes", "Locks of this token are never marked verified."),
-      checkList([
-        ...r.lockRisks.map((x) => ({ ok: false, label: x })),
-        ...r.notes.map((n) => ({ ok: true, label: n, detail: "Doesn't affect locks." })),
-      ]),
     );
-
-    const section = h("section", { class: "recent" }, h("h2", {}, "Locks of this token"), loading("Looking for locks…"));
-    root.append(section);
+    root.append(section, details);
     const found = await lockCreatedEvents(net, MAX_EVENT_PAGES);
     const mine = found.events.filter((e) => e.resource === id);
     const events = mine.slice(0, MAX_LOCKS);
@@ -63,7 +79,8 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
     const failed = loaded.length - locks.length + locks.filter(unreadable).length;
     const complete = found.complete && mine.length === events.length && failed === 0;
     section.lastElementChild?.remove();
-    section.append(lockTable(net, locks, r.divisibility, r.totalSupply, epoch, complete));
+    total.replaceWith(lockedTotal(locks, r.divisibility, r.symbol, r.totalSupply, complete));
+    section.append(lockTable(net, locks, r.divisibility, epoch));
     const gaps = [
       !found.complete || mine.length > events.length ? `Only the newest ${events.length} locks were read.` : "",
       failed ? `${failed} lock(s) could not be read.` : "",
@@ -71,61 +88,51 @@ export async function tokenView(net: NetConfig, id: string, root: HTMLElement) {
     if (gaps.length) section.append(notice("warn", `${gaps.join(" ")} The locked total is at least the amount shown.`));
     section.append(h("p", { class: "muted small" }, `Read from ${indexerHost(net)} at epoch ${epoch}.`));
   } catch (e) {
-    root.lastElementChild?.replaceWith(loadError(net, "Could not load this token", e));
+    root.lastElementChild?.replaceWith(loadError(net, "token", id, `token/${id}`, e));
   }
 }
 
-/** Locks as a table, with the still-locked total. `complete` = every lock of the token was read. */
-export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | null, supply: bigint | null, epoch: number, complete: boolean): HTMLElement {
-  if (locks.length === 0) return h("p", { class: "muted" }, "No Lockbox locks found yet.");
+/** The still-locked total of a token's locks. `complete` = every lock of the token was read. */
+function lockedTotal(locks: LoadedLock[], div: number, symbol: string | null, supply: bigint | null, complete: boolean): HTMLElement {
   // Only genuine locks still before their unlock epoch count as locked supply.
   const lockedNow = locks
     .filter((l) => l.reading.genuine && l.status === "locked" && l.vault?.amount)
     .reduce((sum, l) => sum + (l.vault!.amount ?? 0n), 0n);
-  const share = div !== null ? lockedShare(lockedNow, supply) : null;
+  const share = lockedShare(lockedNow, supply);
+  return h(
+    "p",
+    { class: "locked-total" },
+    complete ? "" : "At least ",
+    h("strong", {}, `${formatAmount(lockedNow, div)} ${symbol ?? ""}`.trim()),
+    " still locked in Lockbox",
+    share ? ` (${complete ? "" : "at least "}${share} of supply)` : supply === null ? " (supply not tracked, so no share)" : "",
+    ". Counts only genuine locks before their unlock epoch.",
+  );
+}
+
+/** Locks as a table: each one's holding, unlock epoch, lifecycle and verdict. */
+export function lockTable(net: NetConfig, locks: LoadedLock[], div: number | null, epoch: number): HTMLElement {
+  if (locks.length === 0) return h("p", { class: "muted" }, "No Lockbox locks found yet.");
   const rows = locks.map((l) => {
     const s = l.reading.state;
     const d = l.resource?.divisibility ?? div ?? 0;
-    const v = verdict(l);
     return h(
       "tr",
       {},
       h("td", { "data-label": "Lock" }, link(net, `lock/${l.id}`, h("code", { title: l.id }, l.id.slice(10, 22)))),
       h("td", { class: "num", "data-label": "Holding" }, l.vault?.amount != null ? `${formatAmount(l.vault.amount, d)} ${l.resource?.symbol ?? ""}`.trim() : "—"),
       h("td", { "data-label": "Unlocks" }, s ? `epoch ${s.unlockEpoch}${s.unlockEpoch > BigInt(epoch) ? ` (in ${s.unlockEpoch - BigInt(epoch)})` : ""}` : "—"),
-      h(
-        "td",
-        { class: "pills", "data-label": "Status" },
-        l.status === "locked" ? pill("Locked", "ok") : l.status === "claimable" ? pill("Unlocked", "warn") : l.status === "claimed" ? pill("Claimed", "neutral") : "—",
-        " ",
-        v === "verified" ? pill("Verified", "ok") : v === "unknown" ? pill("Unknown", "warn") : pill("Not verified", "bad"),
-      ),
+      h("td", { class: "pills", "data-label": "Status" }, h("span", { class: "pill-group" }, statusPill(l.status), verdictPill(verdict(l)))),
     );
   });
   return h(
     "div",
-    {},
-    div !== null
-      ? h(
-          "p",
-          { class: "locked-total" },
-          complete ? "" : "At least ",
-          h("strong", {}, `${formatAmount(lockedNow, div)} ${locks.find((l) => l.resource?.symbol)?.resource?.symbol ?? ""}`.trim()),
-          " still locked",
-          share ? ` (${complete ? "" : "at least "}${share} of supply)` : supply === null ? " (supply not tracked, so no share)" : "",
-          ". Counts only genuine locks before their unlock epoch.",
-        )
-      : null,
+    { class: "table-wrap" },
     h(
-      "div",
-      { class: "table-wrap" },
-      h(
-        "table",
-        { class: "stack" },
-        h("thead", {}, h("tr", {}, h("th", {}, "Lock"), h("th", { class: "num" }, "Holding"), h("th", {}, "Unlocks"), h("th", {}, "Status"))),
-        h("tbody", {}, ...rows),
-      ),
+      "table",
+      { class: "stack" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Lock"), h("th", { class: "num" }, "Holding"), h("th", {}, "Unlocks"), h("th", {}, "Status"))),
+      h("tbody", {}, ...rows),
     ),
   );
 }
-

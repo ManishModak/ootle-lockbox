@@ -2,7 +2,8 @@
 import type { NetConfig } from "../config";
 import { currentEpoch, indexerHost } from "../indexer";
 import { loadLock, verdict, type LoadedLock } from "../lockdata";
-import { addressLine, copyButton, epochsAsDuration, errorText, estimatedDate, h, link, loadError, loading, notice, onThisPage, pill, verdictPanel } from "../ui";
+import { lockChecks, notesLine } from "../proofcopy";
+import { addressLine, epochsAsDuration, errorText, estimatedDate, h, link, loadError, loading, onThisPage, proofTitle, short, statusPill, verdictPanel } from "../ui";
 import { formatAmount, type Check } from "../verify";
 import { claimInstructions, connect, dryRun, forgetEarlierTransaction, getProvider, settleEarlier, submit, TxBlocked, walletKey, requireWalletNetwork } from "../wallet";
 
@@ -17,11 +18,19 @@ export async function lockView(net: NetConfig, id: string, root: HTMLElement) {
     epoch = await currentEpoch(net);
     l = await loadLock(net, id, epoch);
   } catch (e) {
-    root.lastElementChild?.replaceWith(loadError(net, "Could not load this lock", e));
+    root.lastElementChild?.replaceWith(loadError(net, "lock", id, `lock/${id}`, e));
     return;
   }
   root.lastElementChild?.remove();
   root.append(render(net, l, epoch));
+}
+
+/** "unlocks at epoch N, around <date> <tz>" or "unlocked at epoch N", for the verdict summary. */
+function unlockPhrase(net: NetConfig, unlockEpoch: bigint, epoch: number): string {
+  const left = unlockEpoch - BigInt(epoch);
+  if (left <= 0n) return `unlocked at epoch ${unlockEpoch}`;
+  if (left > MAX_DATED_EPOCHS) return `unlocks at epoch ${unlockEpoch}, centuries away`;
+  return `unlocks at epoch ${unlockEpoch}, around ${estimatedDate(net, Number(unlockEpoch), epoch)}`;
 }
 
 function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
@@ -29,41 +38,48 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
   const v = verdict(l);
   const r = l.resource;
   const sym = r?.symbol ?? "tokens";
+  const div = r?.divisibility ?? 0;
+  const { checks, notes } = lockChecks(l);
   const page = h("article", { class: "proof" });
 
+  const summary = s
+    ? h(
+        "p",
+        { class: "verdict-summary" },
+        h("strong", {}, `${formatAmount(s.lockedAmount, div)} ${sym}`),
+        " · beneficiary ",
+        h("code", { title: s.beneficiary }, short(s.beneficiary)),
+        ` · ${unlockPhrase(net, s.unlockEpoch, epoch)}`,
+      )
+    : null;
+  const note = notesLine(notes, "the lock");
+  const lines = [summary, note ? h("p", { class: "verdict-note" }, note) : null];
   const track = s ? epochTrack(s.lockedAtEpoch, s.unlockEpoch, epoch) : null;
   const banner =
     v === "verified"
       ? l.status === "claimed"
-        ? verdictPanel("ok", "Verified lock, now claimed", "It held its tokens until the unlock epoch, and the beneficiary has claimed them.", track)
+        ? verdictPanel("ok", "Verified lock, now claimed", "It held its tokens until the unlock epoch, and the beneficiary has claimed them.", lines, track)
         : l.status === "claimable"
-          ? verdictPanel("ok", "Verified lock, now unlocked", "The unlock epoch has passed; only the beneficiary can claim the tokens.", track)
-          : verdictPanel("ok", "Verified lock", "Nobody can move these tokens before the unlock epoch, and the token's issuer cannot undo it.", track)
+          ? verdictPanel("ok", "Verified lock, now unlocked", "The unlock epoch has passed; only the beneficiary can claim the tokens.", lines, track)
+          : verdictPanel("ok", "Verified lock", "Nobody can move these tokens before the unlock epoch, and the token's issuer cannot undo it.", lines, track)
       : v === "unknown"
-        ? verdictPanel("warn", "Unable to verify", "Some data could not be read; treat this lock as unverified.", track)
-        : verdictPanel("bad", "Not verified", "See the failed checks below.", track);
+        ? verdictPanel("warn", "Unable to verify", "Some data could not be read; treat this lock as unverified.", lines, track)
+        : verdictPanel("bad", "Not verified", "See the failed checks below.", lines, track);
   page.append(
-    h(
-      "div",
-      { class: "title-row" },
-      h("h1", {}, "Lock ", h("code", { class: "title-addr", title: l.id }, l.id.slice(10, 22))),
-      copyButton(location.href, "Copy link to this proof"),
-    ),
+    proofTitle(h("h1", {}, "Lock ", h("code", { class: "title-addr", title: l.id }, l.id.slice(10, 22)))),
+    h("p", { class: "title-sub" }, addressLine(l.id)),
     banner,
   );
 
   if (s) {
-    const statusPill =
-      l.status === "locked" ? pill("Locked", "ok") : l.status === "claimable" ? pill("Unlocked, not claimed", "warn") : pill("Claimed", "neutral");
     const left = s.unlockEpoch - BigInt(epoch);
     const amountNow = l.vault?.amount;
-    const div = r?.divisibility ?? 0;
     page.append(
       h(
         "dl",
         { class: "facts panel" },
         h("dt", {}, "Status"),
-        h("dd", {}, statusPill),
+        h("dd", {}, statusPill(l.status, "Unlocked, not claimed")),
         h("dt", {}, "Holding now"),
         h(
           "dd",
@@ -103,14 +119,11 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
     );
   }
 
-  const tokenChecks: Check[] = r
-    ? [
-        { ok: r.lockRisks.length === 0, label: "The token's issuer cannot undo the lock", detail: r.lockRisks.join(" ") || undefined },
-        ...r.notes.map((n) => ({ ok: true, label: n, detail: "Doesn't affect the lock." })),
-      ]
-    : [{ ok: false, label: "Token rules are readable" }];
-  page.append(checksSection([...l.reading.checks, ...tokenChecks]));
-
+  // Claiming signs a call to this component, so only offer it for a genuine Lockbox. A verified
+  // lock's claim comes right after its facts; otherwise only after the checks have been read.
+  const claim = s && l.status === "claimable" && l.reading.genuine ? claimBox(net, l) : null;
+  if (claim && v === "verified") page.append(claim);
+  page.append(checksSection(checks, notes, "Doesn't affect the lock."));
   page.append(
     h(
       "p",
@@ -120,9 +133,7 @@ function render(net: NetConfig, l: LoadedLock, epoch: number): HTMLElement {
       "This page trusts that indexer; anyone can re-check with their own.",
     ),
   );
-
-  // Claiming signs a call to this component, so only offer it for a genuine Lockbox.
-  if (s && l.status === "claimable" && l.reading.genuine) page.append(claimBox(net, l));
+  if (claim && v !== "verified") page.append(claim);
   return page;
 }
 
@@ -142,38 +153,68 @@ export function checkList(checks: Check[]): HTMLElement {
   );
 }
 
-/** "Checks" with how many passed, then the list, as one panel on a proof page. */
-export function checksSection(checks: Check[]): HTMLElement {
+/** A token's notes: things its issuer can still change that don't affect locks. Never counted as checks. */
+export function notesList(notes: string[], detail: string): HTMLElement {
+  return h(
+    "div",
+    { class: "notes" },
+    h("h3", {}, "Notes"),
+    h(
+      "ul",
+      { class: "checks" },
+      ...notes.map((n) =>
+        h(
+          "li",
+          { class: "note" },
+          h("span", { class: "mark", "aria-hidden": "true" }, "i"),
+          h("span", { class: "sr" }, "Note: "),
+          h("span", { class: "check-text" }, n, h("span", { class: "check-detail" }, detail)),
+        ),
+      ),
+    ),
+  );
+}
+
+/** "Checks" with how many passed, then the list and any notes (not counted), as one panel on a proof page. */
+export function checksSection(checks: Check[], notes: string[] = [], noteDetail = ""): HTMLElement {
   const passed = checks.filter((c) => c.ok).length;
   return h(
     "section",
     { class: "panel checks-panel" },
     h("div", { class: "checks-head" }, h("h2", {}, "Checks"), h("span", { class: passed === checks.length ? "count ok" : "count bad" }, `${passed} of ${checks.length} passed`)),
     checkList(checks),
+    notes.length ? notesList(notes, noteDetail) : null,
   );
 }
 
 /**
- * The lock's span from its lock epoch to its unlock epoch, with where the chain is now. Visual
- * only (the same epochs are listed in the facts), so it is hidden from screen readers.
+ * The lock's span from its lock epoch to its unlock epoch. Before the unlock epoch a marker and a
+ * "Now" label show where the chain is; after it, a caption below says how long ago it unlocked.
+ * Visual only (the same epochs are in the summary and facts), so hidden from screen readers.
  */
 function epochTrack(lockedAt: bigint, unlockAt: bigint, now: number): HTMLElement {
   const span = unlockAt - lockedAt;
   const done = BigInt(now) - lockedAt;
+  const reached = BigInt(now) >= unlockAt;
   // Basis points, so huge u64 epochs never lose precision through Number.
   const bp = span <= 0n || done >= span ? 10000 : done <= 0n ? 0 : Number((done * 10000n) / span);
   const pct = `${bp / 100}%`;
+  const ago = BigInt(now) - unlockAt;
   return h(
     "div",
     { class: "track", "aria-hidden": "true" },
-    h("div", { class: "track-bar" }, h("div", { class: "track-fill", style: `width: ${pct}` }), h("div", { class: "track-now", style: `left: ${pct}` })),
+    // Shifting the label left by its own position keeps it inside the bar at either end.
+    reached ? null : h("div", { class: "track-now-row" }, h("span", { class: "track-now-label", style: `left: ${pct}; transform: translateX(-${pct})` }, "Now ", h("strong", {}, `epoch ${now}`))),
+    h("div", { class: "track-bar" }, h("div", { class: "track-fill", style: `width: ${pct}` }), reached ? null : h("div", { class: "track-now", style: `left: ${pct}` })),
     h(
       "div",
       { class: "track-labels" },
       h("span", {}, "Locked at ", h("strong", {}, `epoch ${lockedAt}`)),
-      h("span", { class: "track-now-label" }, "Now ", h("strong", {}, `epoch ${now}`)),
-      h("span", {}, "Unlocks at ", h("strong", {}, `epoch ${unlockAt}`)),
+      h("span", {}, reached ? "Unlocked at " : "Unlocks at ", h("strong", {}, `epoch ${unlockAt}`)),
     ),
+    reached
+      ? h("p", { class: "track-caption" }, `${ago === 0n ? "Unlocked this epoch" : `Unlocked ${ago} epoch${ago === 1n ? "" : "s"} ago`} · now epoch ${now}`)
+      : null,
   );
 }
 

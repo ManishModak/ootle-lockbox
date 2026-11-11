@@ -6,17 +6,28 @@ import { decodeEvent } from "@tari-project/ootle";
 import { decodeSubstateValue as decodeSubstateJson } from "@tari-project/ootle-wasm-bor";
 import type { NetConfig } from "./config";
 
-export class IndexerError extends Error {}
+/**
+ * A failed indexer read. `kind` lets pages word it: the indexer couldn't be reached (or answered
+ * with an error), the address isn't there, or what came back couldn't be used.
+ */
+export class IndexerError extends Error {
+  constructor(
+    message: string,
+    readonly kind: "unreachable" | "not-found" | "bad-data" = "bad-data",
+  ) {
+    super(message);
+  }
+}
 
 async function getJson(url: string): Promise<any> {
   let res: Response;
   try {
     res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   } catch (e) {
-    throw new IndexerError(`Could not reach the indexer (${(e as Error).message}).`);
+    throw new IndexerError(`Could not reach the indexer (${(e as Error).message}).`, "unreachable");
   }
-  if (res.status === 404) throw new IndexerError("Not found on this network.");
-  if (!res.ok) throw new IndexerError(`The indexer answered ${res.status}.`);
+  if (res.status === 404) throw new IndexerError("Not found on this network.", "not-found");
+  if (!res.ok) throw new IndexerError(`The indexer answered ${res.status}.`, "unreachable");
   return res.json();
 }
 

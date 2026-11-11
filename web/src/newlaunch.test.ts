@@ -40,10 +40,10 @@ describe("launchProblem", () => {
     expect(withChange((i) => (i.supply = 0n))).toMatch(/supply/);
     expect(withChange((i) => (i.supply = 2n ** 128n))).toMatch(/too large/);
     expect(withChange((i) => (i.supply = 2n ** 128n - 1n))).toBeNull();
-    expect(withChange((i) => (i.locks = []))).toMatch(/1–8 locks/);
-    expect(withChange((i) => (i.locks = Array(9).fill(i.locks[1])))).toMatch(/1–8 locks/);
-    expect(withChange((i) => (i.locks[1].amount = 0n))).toMatch(/Lock 2: the amount/);
-    expect(withChange((i) => (i.locks[0].unlockEpoch = NOW))).toMatch(/Lock 1: the unlock time must be in the future/);
+    expect(withChange((i) => (i.locks = []))).toMatch(/1–8 allocations/);
+    expect(withChange((i) => (i.locks = Array(9).fill(i.locks[1])))).toMatch(/1–8 allocations/);
+    expect(withChange((i) => (i.locks[1].amount = 0n))).toMatch(/Allocation 2: the amount/);
+    expect(withChange((i) => (i.locks[0].unlockEpoch = NOW))).toMatch(/Allocation 1: the unlock time must be in the future/);
     expect(withChange((i) => (i.locks[0].unlockEpoch = NOW + 530_001n))).toMatch(/too far/);
     expect(withChange((i) => (i.locks[0].amount = i.supply))).toMatch(/more than the supply/);
   });

@@ -7,18 +7,20 @@ import type { NetConfig } from "../config";
 import { addressFromTxEvent, currentEpoch, getSubstate } from "../indexer";
 import { isThisLaunch, LAUNCH_DECIMALS, launchProblem, MAX_LAUNCH_LOCKS, type LaunchInput, type LaunchLockInput } from "../newlaunch";
 import { MAX_FEE, NATIVE_TARI, NETWORK_BYTE, parseBeneficiary, unlockEpochFor } from "../newlock";
-import { errorText, estimatedDate, flowSteps, formatDate, h, link, notice, onThisPage } from "../ui";
+import { errorText, estimatedDate, flowSteps, formatDate, h, notice, onThisPage } from "../ui";
 import { loadLaunch } from "../lockdata";
 import { formatAmount, parseAmount } from "../verify";
 import { balances, connect, dryRun, getProvider, launchInstructions, settleEarlier, submit, txHash, walletKey, requireWalletNetwork } from "../wallet";
 import { setFormBusy, showTxError } from "./lock";
+import { launchCrumb, launchEyebrow } from "./launch";
+import { notPublishedNotice } from "./home";
 
 const CLI_URL = "https://github.com/ManishModak/ootle-launch-commitments";
 
 export async function launchFormView(net: NetConfig, root: HTMLElement) {
-  root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / launch"), h("h1", {}, "Launch a token"));
+  root.append(launchCrumb(net, "launch a token"), launchEyebrow(), h("h1", {}, "Launch a token"));
   if (!net.launchTemplate || net.launchFee === null) {
-    root.append(notice("info", `Launch Commitments is not published on ${net.label} yet.`));
+    root.append(notPublishedNotice(net, "Launch Commitments", "launch"));
     return;
   }
   const fee = net.launchFee;
@@ -36,19 +38,18 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
     status,
     h("p", { class: "muted small" }, "No wallet? Launch from a terminal with launch-cli (", h("a", { href: CLI_URL }, "source"), ")."),
   );
-  root.append(
-    h(
-      "div",
-      { class: "flow" },
-      intro,
-      flowSteps(
-        "Connect your Sapient wallet.",
-        "Name the token and set its supply.",
-        "Add the allocations to lock.",
-        "Review every key and amount, then sign. A dry run checks it first.",
-      ),
+  const flow = h(
+    "div",
+    { class: "flow" },
+    intro,
+    flowSteps(
+      "Connect your Sapient wallet.",
+      "Name the token and set its supply.",
+      "Add the allocations to lock.",
+      "Review every key and amount, then sign. A dry run checks it first.",
     ),
   );
+  root.append(flow);
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
     status.textContent = "Connecting…";
@@ -67,7 +68,8 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
       if (tari < fee + MAX_FEE) {
         throw new Error(`You need at least ${formatAmount(fee + MAX_FEE, 6)} TARI as a public balance (the fee plus the network fee); you have ${formatAmount(tari, 6)}.`);
       }
-      intro.replaceWith(form(net, p, account, myKey, epoch));
+      // The form and its review take the full width; the steps have done their job.
+      flow.replaceWith(form(net, p, account, myKey, epoch));
     } catch (e) {
       showTxError(net, status, e);
       btn.removeAttribute("disabled");
@@ -77,7 +79,9 @@ export async function launchFormView(net: NetConfig, root: HTMLElement) {
 
 type Provider = NonNullable<Awaited<ReturnType<typeof getProvider>>>;
 
-/** One lock row's inputs. */
+let rowIds = 0;
+
+/** One allocation row's inputs. */
 interface LockRow {
   el: HTMLElement;
   amount: HTMLInputElement;
@@ -93,26 +97,41 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, epoch
   const supply = input("supply", { inputmode: "decimal", placeholder: "e.g. 1000000" });
   const rows: LockRow[] = [];
   const list = h("div", { class: "locks" });
-  const add = h("button", { type: "button", class: "ghost small" }, "Add a lock");
+  const add = h("button", { type: "button", class: "ghost small" }, "Add an allocation");
   const errors = h("p", { class: "error", "aria-live": "polite" });
   const review = h("div");
 
+  // Legends follow the rows' order ("Allocation 1", "Allocation 2"), also after a removal.
+  const renumber = () => rows.forEach((r, i) => (r.el.querySelector("legend")!.textContent = `Allocation ${i + 1}`));
   const addRow = () => {
+    const n = ++rowIds;
     const r: LockRow = {
-      amount: h("input", { type: "text", inputmode: "decimal", autocomplete: "off", placeholder: "Amount", "aria-label": "Amount" }) as HTMLInputElement,
-      when: h("input", { type: "datetime-local", "aria-label": "Unlock after" }) as HTMLInputElement,
-      key: h("input", { type: "text", autocomplete: "off", spellcheck: "false", placeholder: "Beneficiary: blank = me, or otl_… / 64-hex key", "aria-label": "Beneficiary" }) as HTMLInputElement,
+      amount: h("input", { id: `alloc-amount-${n}`, type: "text", inputmode: "decimal", autocomplete: "off", placeholder: "e.g. 200000" }) as HTMLInputElement,
+      when: h("input", { id: `alloc-when-${n}`, type: "datetime-local" }) as HTMLInputElement,
+      key: h("input", { id: `alloc-key-${n}`, type: "text", autocomplete: "off", spellcheck: "false", placeholder: "otl_… or 64-hex key", "aria-describedby": `alloc-key-help-${n}` }) as HTMLInputElement,
       el: h("fieldset", { class: "lock-row" }),
     };
     const remove = h("button", { type: "button", class: "ghost small" }, "Remove");
     remove.addEventListener("click", () => {
       rows.splice(rows.indexOf(r), 1);
       r.el.remove();
+      renumber();
       add.removeAttribute("disabled");
     });
-    r.el.append(h("legend", {}, "Lock"), r.amount, r.when, r.key, remove);
+    r.el.append(
+      h("legend", {}),
+      h("label", { for: r.amount.id }, "Amount"),
+      r.amount,
+      h("label", { for: r.when.id }, "Unlock after"),
+      r.when,
+      h("label", { for: r.key.id }, "Beneficiary (who can claim)"),
+      r.key,
+      h("p", { class: "muted small help", id: `alloc-key-help-${n}` }, "Leave blank to make yourself the beneficiary."),
+      remove,
+    );
     rows.push(r);
     list.append(r.el);
+    renumber();
     if (rows.length >= MAX_LAUNCH_LOCKS) add.setAttribute("disabled", "");
   };
   add.addEventListener("click", addRow);
@@ -176,12 +195,12 @@ function readForm(
   const targets: number[] = [];
   for (const [i, r] of rows.entries()) {
     const amount = parseAmount(r.amount.value, LAUNCH_DECIMALS);
-    if (amount === null) return `Lock ${i + 1}: enter an amount with at most ${LAUNCH_DECIMALS} decimals.`;
+    if (amount === null) return `Allocation ${i + 1}: enter an amount with at most ${LAUNCH_DECIMALS} decimals.`;
     const target = r.when.value ? Date.parse(r.when.value) : Number.NaN;
     const epoch = unlockEpochFor(net, now, target, Date.now());
-    if (epoch === null) return `Lock ${i + 1}: pick an unlock time in the future.`;
+    if (epoch === null) return `Allocation ${i + 1}: pick an unlock time in the future.`;
     const key = r.key.value.trim() === "" ? myKey : parseBeneficiary(r.key.value, NETWORK_BYTE[net.name]);
-    if (key === null) return `Lock ${i + 1}: enter a valid ${net.label} Ootle address or public key (64 hex characters), or leave it blank for yourself.`;
+    if (key === null) return `Allocation ${i + 1}: enter a valid ${net.label} Ootle address or public key (64 hex characters), or leave it blank for yourself.`;
     locks.push({ amount, unlockEpoch: BigInt(epoch), beneficiary: key });
     targets.push(target);
   }
@@ -222,7 +241,7 @@ function reviewBox(
       { class: "table-wrap" },
       h(
         "table",
-        { class: "stack" },
+        { class: "stack wrap-cells" },
         h("thead", {}, h("tr", {}, h("th", { class: "num" }, "Amount"), h("th", {}, "Unlocks"), h("th", {}, "Beneficiary (full key)"))),
         h(
           "tbody",

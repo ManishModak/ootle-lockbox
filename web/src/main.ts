@@ -32,9 +32,10 @@ function header(net: NetConfig): HTMLElement {
     ...Object.values(NETWORKS).map((c) => h("option", { value: c.name, selected: c.name === net.name }, c.label)),
   ) as HTMLSelectElement;
   select.addEventListener("change", () => (location.hash = `#/${select.value}`));
-  const here = parseRoute().page;
+  // Only the form pages themselves are "current": a launch proof shares the "launch" route but isn't the form.
+  const here = parseRoute();
   const navLink = (page: string, text: string) =>
-    h("a", { href: `#/${net.name}/${page}`, "aria-current": here === page ? "page" : undefined }, text);
+    h("a", { href: `#/${net.name}/${page}`, "aria-current": here.page === page && here.id === "" ? "page" : undefined }, text);
   return h(
     "header",
     { class: "top" },

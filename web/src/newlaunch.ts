@@ -41,17 +41,17 @@ export function launchProblem(input: LaunchInput, currentEpoch: bigint): string 
   if (imageUrl !== "" && !imageUrl.startsWith("https://")) return "The image URL must start with https://.";
   if (supply <= 0n) return "The supply must be more than zero.";
   if (supply > MAX_AMOUNT) return "The supply is too large.";
-  if (locks.length < 1 || locks.length > MAX_LAUNCH_LOCKS) return `Add 1–${MAX_LAUNCH_LOCKS} locks.`;
+  if (locks.length < 1 || locks.length > MAX_LAUNCH_LOCKS) return `Add 1–${MAX_LAUNCH_LOCKS} allocations.`;
   let total = 0n;
   for (const [i, l] of locks.entries()) {
-    const n = `Lock ${i + 1}`;
+    const n = `Allocation ${i + 1}`;
     if (l.amount <= 0n) return `${n}: the amount must be more than zero.`;
     if (!isValidPublicKey(l.beneficiary)) return `${n}: the beneficiary is not a valid public key.`;
     if (l.unlockEpoch <= currentEpoch) return `${n}: the unlock time must be in the future.`;
     if (l.unlockEpoch - currentEpoch > MAX_LOCK_EPOCHS) return `${n}: the unlock time is too far away (at most ${MAX_LOCK_EPOCHS} epochs).`;
     total += l.amount;
   }
-  if (total > supply) return "The locks add up to more than the supply.";
+  if (total > supply) return "The allocations add up to more than the supply.";
   return null;
 }
 

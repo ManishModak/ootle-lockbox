@@ -2,7 +2,9 @@
  * Tiny DOM helpers shared by the views. Everything from the chain goes in as text nodes, never as
  * HTML, so token names and memos can't inject markup.
  */
-import type { NetConfig } from "./config";
+import { NETWORKS, type NetConfig } from "./config";
+import { IndexerError } from "./indexer";
+import type { LockStatus } from "./verify";
 
 type Child = Node | string | number | null | undefined | false;
 type Attrs = Record<string, string | boolean | ((e: Event) => void) | undefined>;
@@ -80,9 +82,17 @@ export function epochsAsDuration(net: NetConfig, epochs: number): string {
   return `about ${(days / 365.25).toFixed(1)} years`;
 }
 
-/** A date and time in the viewer's locale, e.g. "9 Nov 2026, 14:05". */
+/** The viewer's offset from UTC at that moment, e.g. "UTC+5:30", "UTC-4" or "UTC". */
+export function tzLabel(ms: number): string {
+  const off = -new Date(ms).getTimezoneOffset();
+  if (off === 0) return "UTC";
+  const a = Math.abs(off);
+  return `UTC${off > 0 ? "+" : "-"}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, "0")}` : ""}`;
+}
+
+/** A date and time in the viewer's locale with its timezone, e.g. "9 Nov 2026, 14:05 UTC+5:30". */
 export function formatDate(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return `${new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} ${tzLabel(ms)}`;
 }
 
 /** When `epoch` most likely starts, at the network's typical epoch length. */
@@ -90,8 +100,22 @@ export function estimatedDate(net: NetConfig, epoch: number, currentEpoch: numbe
   return formatDate(Date.now() + (epoch - currentEpoch) * net.epochMinutes.typical * 60_000);
 }
 
+/** A verdict-coloured pill (mint, amber, coral) or a neutral one. */
 export function pill(text: string, kind: "ok" | "warn" | "bad" | "neutral"): HTMLElement {
   return h("span", { class: `pill ${kind}` }, text);
+}
+
+/** A lock's lifecycle (not a verdict), so it never uses the verdict colours. */
+export function statusPill(status: LockStatus | null | undefined, unlocked = "Unlocked"): HTMLElement | string {
+  if (status === "locked") return h("span", { class: "pill state-locked" }, "Locked");
+  if (status === "claimable") return h("span", { class: "pill state-unlocked" }, unlocked);
+  if (status === "claimed") return h("span", { class: "pill state-claimed" }, "Claimed");
+  return "—";
+}
+
+/** A lock's verdict as a pill, for tables. */
+export function verdictPill(v: "verified" | "unverified" | "unknown"): HTMLElement {
+  return v === "verified" ? pill("Verified", "ok") : v === "unknown" ? pill("Unknown", "warn") : pill("Not verified", "bad");
 }
 
 export function notice(kind: "info" | "warn" | "bad" | "ok", ...children: Child[]): HTMLElement {
@@ -127,21 +151,55 @@ export function seal(kind: Verdict): Element {
 }
 
 /**
- * The verdict at the top of a proof: seal, a one-line title and what it means. `extra` goes under
- * the text, inside the same panel (e.g. the lock's epoch track).
+ * The verdict at the top of a proof: seal, a heading-level title and what it means. `lines` go
+ * under the text beside the seal (summary, note); `extra` goes below, inside the same panel (e.g.
+ * the lock's epoch track).
  */
-export function verdictPanel(kind: Verdict, title: string, text: Child, extra?: Child): HTMLElement {
+export function verdictPanel(kind: Verdict, title: string, text: Child, lines: Child[] = [], extra?: Child): HTMLElement {
+  const id = `verdict-${++verdictIds}`;
   return h(
     "section",
-    { class: `verdict ${kind}`, role: kind === "bad" ? "alert" : undefined },
-    h("div", { class: "verdict-head" }, seal(kind), h("div", {}, h("p", { class: "verdict-title" }, title), h("p", { class: "verdict-text" }, text))),
+    { class: `verdict ${kind}`, role: kind === "bad" ? "alert" : undefined, "aria-labelledby": id },
+    h(
+      "div",
+      { class: "verdict-head" },
+      seal(kind),
+      h("div", {}, h("h2", { class: "verdict-title", id }, title), h("p", { class: "verdict-text" }, text), ...lines),
+    ),
     extra,
   );
 }
+let verdictIds = 0;
 
-/** A page that couldn't load: what failed, why, and the way back to the lookup. */
-export function loadError(net: NetConfig, title: string, e: unknown): HTMLElement {
-  return h("div", {}, verdictPanel("bad", title, errorText(e)), h("p", {}, link(net, "", "Check another address", "button ghost")));
+/** A page title with the "Copy link to this proof" action beside it. */
+export function proofTitle(title: HTMLElement): HTMLElement {
+  return h("div", { class: "title-row" }, title, copyButton(location.href, "Copy link to this proof"));
+}
+
+/**
+ * A page that couldn't load, as a neutral panel (it is not a verdict on anything): nothing at that
+ * address on this network, with a link to the same address on the other one; or the indexer
+ * couldn't be reached, with Retry. `path` is the page's route without the network, e.g. `lock/<id>`.
+ */
+export function loadError(net: NetConfig, what: string, id: string, path: string, e: unknown): HTMLElement {
+  const other = Object.values(NETWORKS).find((n) => n.name !== net.name);
+  const kind = e instanceof IndexerError ? e.kind : "bad-data";
+  const retry = h("button", { type: "button", class: "ghost" }, "Retry");
+  retry.addEventListener("click", () => window.dispatchEvent(new HashChangeEvent("hashchange")));
+  const back = link(net, "", "Check another address", "button ghost");
+  const body =
+    kind === "not-found"
+      ? [
+          h("h1", {}, `No ${what} at `, h("code", { title: id }, short(id)), ` on ${net.label}.`),
+          h("p", { class: "muted" }, "Check the address, or the network it was made on."),
+          h("div", { class: "row" }, other ? h("a", { href: `#/${other.name}/${path}`, class: "button" }, `Look on ${other.label}`) : null, back),
+        ]
+      : [
+          h("h1", {}, kind === "unreachable" ? "Couldn't reach the indexer" : `Couldn't load this ${what}`),
+          h("p", { class: "muted" }, errorText(e)),
+          h("div", { class: "row" }, retry, back),
+        ];
+  return h("section", { class: "panel load-error" }, ...body);
 }
 
 /** The numbered steps beside a wallet flow's intro, so the page says what will happen. */

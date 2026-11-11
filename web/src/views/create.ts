@@ -14,7 +14,7 @@ import { notPublishedNotice } from "./home";
 export async function createView(net: NetConfig, root: HTMLElement) {
   root.append(h("p", { class: "crumb" }, link(net, "", "Lockbox"), " / create"), h("h1", {}, "Create a lock"));
   if (!net.lockboxTemplate) {
-    root.append(notPublishedNotice(net));
+    root.append(notPublishedNotice(net, "Lockbox", "create"));
     return;
   }
   const status = h("p", { class: "muted", "aria-live": "polite" });
@@ -27,19 +27,18 @@ export async function createView(net: NetConfig, root: HTMLElement) {
     status,
     h("p", { class: "muted small" }, "No wallet? Lock from a terminal with ", h("a", { href: REPO_URL }, "lockbox-cli"), "."),
   );
-  root.append(
-    h(
-      "div",
-      { class: "flow" },
-      intro,
-      flowSteps(
-        "Connect your Sapient wallet.",
-        "Pick a token, amount, unlock time and beneficiary.",
-        "Review the token's rules and the lock's terms.",
-        "Sign. A dry run checks it first.",
-      ),
+  const flow = h(
+    "div",
+    { class: "flow" },
+    intro,
+    flowSteps(
+      "Connect your Sapient wallet.",
+      "Pick a token, amount, unlock time and beneficiary.",
+      "Review the token's rules and the lock's terms.",
+      "Sign. A dry run checks it first.",
     ),
   );
+  root.append(flow);
   btn.addEventListener("click", async () => {
     btn.setAttribute("disabled", "");
     status.textContent = "Connecting…";
@@ -56,7 +55,8 @@ export async function createView(net: NetConfig, root: HTMLElement) {
       const owner = String((acct.value as any)?.Component?.header?.owner_rule?.ByPublicKey ?? "").toLowerCase();
       if (!myKey) throw new Error(`Could not read your wallet's ${net.label} address.`);
       if (owner !== myKey) throw new Error("Your wallet's key doesn't match its account's owner on the indexer, so this page can't confirm who you are. Lock with lockbox-cli instead.");
-      intro.replaceWith(form(net, p, account, myKey, list, epoch));
+      // The form and its review take the full width; the steps have done their job.
+      flow.replaceWith(form(net, p, account, myKey, list, epoch));
     } catch (e) {
       showTxError(net, status, e);
       btn.removeAttribute("disabled");
@@ -110,7 +110,15 @@ function form(net: NetConfig, p: Provider, account: string, myKey: string, list:
     h("label", { for: "when" }, "Unlock after"),
     when,
     whenOut,
-    h("fieldset", {}, h("legend", {}, "Beneficiary (who can claim)"), h("label", { class: "inline" }, meRadio, " Me (this wallet)"), h("label", { class: "inline" }, otherRadio, " Someone else"), other),
+    h(
+      "fieldset",
+      {},
+      h("legend", {}, "Beneficiary (who can claim)"),
+      h("label", { class: "inline" }, meRadio, " Me (this wallet)"),
+      h("label", { class: "inline" }, otherRadio, " Someone else"),
+      h("label", { for: "other" }, "Their Ootle address or public key"),
+      other,
+    ),
     h("label", { for: "memo" }, "Memo (public, optional)"),
     memo,
     errors,
