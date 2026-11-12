@@ -56,7 +56,13 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
   },
 };
 
-export const DEFAULT_NETWORK: NetworkName = "esmeralda";
+/** The network a URL without one opens on (the bare site address). Shared links always name theirs. */
+export const DEFAULT_NETWORK: NetworkName = "mainnet";
+
+/** The network a URL's first segment names, or the default for anything else (own keys only, so "constructor" isn't one). */
+export function networkFor(name: string): NetConfig {
+  return Object.hasOwn(NETWORKS, name) ? NETWORKS[name as NetworkName] : NETWORKS[DEFAULT_NETWORK];
+}
 
 /** Matches the template's MAX_MEMO_BYTES. */
 export const MAX_MEMO_BYTES = 280;

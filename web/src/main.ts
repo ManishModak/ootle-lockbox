@@ -3,7 +3,7 @@
  * Hash routes keep it a static site, so it runs on GitHub Pages with no server.
  */
 import "./style.css";
-import { DEFAULT_NETWORK, NETWORKS, REPO_URL, type NetConfig, type NetworkName } from "./config";
+import { REPO_URL, networkFor, type NetConfig } from "./config";
 import { networkMenu, type NetworkMenu } from "./netmenu";
 import { beginPage, h, logo, reducedMotion } from "./ui";
 import { createView } from "./views/create";
@@ -22,8 +22,7 @@ interface Route {
 
 function parseRoute(): Route {
   const [n, page = "", id = ""] = location.hash.replace(/^#\/?/, "").split("/");
-  const net = NETWORKS[(n as NetworkName) in NETWORKS ? (n as NetworkName) : DEFAULT_NETWORK];
-  return { net, page, id };
+  return { net: networkFor(n), page, id };
 }
 
 function header(route: Route, menu: NetworkMenu): HTMLElement {
