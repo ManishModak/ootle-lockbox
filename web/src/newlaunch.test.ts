@@ -73,7 +73,8 @@ describe("launch transaction", () => {
     expect(text.indexOf('"withdraw"')).toBeLessThan(text.indexOf('"launch"'));
     expect(text.indexOf('"launch"')).toBeLessThan(text.indexOf('"deposit"'));
     expect(text).toContain(NETWORKS.esmeralda.launchTemplate!);
-    expect(() => launchInstructions(NETWORKS.mainnet, account, valid())).toThrow(/not published/);
+    const unpublished = { ...NETWORKS.mainnet, launchTemplate: null, launchFee: null };
+    expect(() => launchInstructions(unpublished, account, valid())).toThrow(/not published/);
   });
 });
 

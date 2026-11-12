@@ -6,6 +6,7 @@
 //! name, account secret hex, view secret hex) and is never printed.
 
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
@@ -24,12 +25,19 @@ use ootle_rs::{
     default_indexer_url,
     key_provider::PrivateKeyProvider,
     keys::OotleSecretKey,
-    provider::{IndexerProvider, ProviderBuilder, WalletProvider},
-    template_types::{Amount, ComponentAddress, constants::TARI_TOKEN},
+    provider::{IndexerProvider, Provider as _, ProviderBuilder, WalletProvider, WantInput},
+    stealth::StealthTransfer,
+    template_types::{
+        Amount,
+        ComponentAddress,
+        UtxoAddress,
+        constants::TARI_TOKEN,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    },
     wallet::OotleWallet,
 };
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
-use tari_ootle_transaction::Epoch;
+use tari_ootle_transaction::{Epoch, Transaction};
 
 /// Most a transaction may reserve, and so spend, on network fees: 5 TARI, in µT.
 pub const MAX_FEE: u64 = 5_000_000;
@@ -160,6 +168,75 @@ impl Session {
         for event in &receipt.events {
             println!("event: {} {{{}}}", event.topic(), event.payload());
         }
+        Ok(())
+    }
+
+    /// Moves a stealth TARI UTXO owned by this key (wallets such as Tari Universe send stealth
+    /// TARI) into this key's public account, creating the account if needed. The whole `value`
+    /// is revealed; `fee` of it pays the network fee (an overpayment is kept by validators, so
+    /// pass about what the dry run reports) and the rest is deposited.
+    pub async fn fund_from_stealth(
+        mut self,
+        owner: ootle_rs::Address,
+        public_key: RistrettoPublicKeyBytes,
+        account: ComponentAddress,
+        commitment: &str,
+        value: u64,
+        fee: u64,
+        submit: bool,
+    ) -> Result<()> {
+        ensure!(fee < value, "the fee {fee} µT must be below the UTXO value {value} µT");
+        // The fee bucket is never refunded, so a typo here would be lost: cap it like `run` does.
+        ensure!(fee <= MAX_FEE, "the fee {fee} µT is above the {MAX_FEE} µT limit");
+        let provider = &self.provider;
+        let commitment =
+            PedersenCommitmentBytes::from_hex(commitment).map_err(|e| anyhow!("bad commitment: {e:?}"))?;
+        let (statement, signers) = StealthTransfer::new(TARI_TOKEN, provider)
+            .spend_stealth_input(owner, commitment)
+            .to_revealed_output(value)
+            .prepare()
+            .await
+            .context("prepare the stealth spend (is this UTXO ours, and is the value exact?)")?;
+        let nonce: u64 = rand::random();
+        let tx = Transaction::builder(provider.network(), Epoch(self.epoch + EPOCH_WINDOW))
+            .with_fee_instructions_builder(|b| {
+                b.stealth_transfer(TARI_TOKEN, statement)
+                    .put_last_instruction_output_on_workspace("all")
+                    .take_from_bucket("all", fee, "fee")
+                    .pay_fee_from_bucket("fee")
+                    .create_account_with_bucket(public_key, "all")
+            })
+            .add_input(TARI_TOKEN)
+            .add_input(UtxoAddress::new(TARI_TOKEN, commitment.into()))
+            .with_nonce(nonce)
+            .build_unsigned();
+        // If the account already exists, CreateAccount deposits into it and needs it and its
+        // TARI vault as inputs; both stay optional so a first deposit still creates them.
+        let wants = HashSet::from([
+            WantInput::SpecificSubstate { substate_id: account.into(), required: false },
+            WantInput::VaultForResource { component_address: account, resource_address: TARI_TOKEN, required: false },
+        ]);
+        let tx = provider.resolve_input_want_list(tx, &wants).await?;
+        let authorizer = provider.wallet().stealth_authorizer(signers);
+
+        let dry = provider.sign_and_send_dry_run_with(&authorizer, tx.clone()).await?;
+        if let Some(reason) = dry.finalize.any_reject() {
+            bail!("dry run rejected: {reason}");
+        }
+        let required = dry.finalize.required_fees();
+        println!("dry run ok; network fee {required} µT, paying {fee} µT; {} µT goes to {account}", value - fee);
+        ensure!(required <= fee, "the transaction needs {required} µT in fees but only {fee} µT is paid");
+        if !submit {
+            println!("not sent (add --submit to send)");
+            return Ok(());
+        }
+        let signed = TransactionRequest::default().with_transaction(tx).build(&authorizer).await?;
+        let pending = self.provider.send_transaction(signed).await?;
+        println!("sent {}", pending.tx_id());
+        let outcome = pending.watch().await?;
+        ensure!(outcome.is_commit(), "transaction {} did not commit: {outcome:?}", pending.tx_id());
+        let receipt = pending.get_receipt().await?;
+        println!("committed in epoch {}, fee paid {} µT", receipt.epoch, receipt.fee_receipt.total_fees_paid());
         Ok(())
     }
 

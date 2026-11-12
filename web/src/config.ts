@@ -45,9 +45,9 @@ export const NETWORKS: Record<NetworkName, NetConfig> = {
     label: "Mainnet",
     network: Network.MainNet,
     indexer: "https://indexer-a.ootle.tari.com",
-    lockboxTemplate: null,
-    launchTemplate: null,
-    launchFee: null,
+    lockboxTemplate: "968740ec9a0f3d368af2ba48d18af68bbb5c73a30ec582fbf9b00f90cb20ec72", // published 12 Nov 2026, tx 33f102de…
+    launchTemplate: "b18fc1ae9195b569362311b6719896aa84078aedf4cf70a4aba19d516bcc9963", // published 12 Nov 2026, tx 6930fcd4…
+    launchFee: 2_500_000_000n, // 2,500 TARI, paid to the Tari Universe account component_ee1a31b3…
     walletNetwork: "mainnet",
     // An epoch is 10 L1 blocks on mainnet since height 126,000 (Minotari v6 consensus_constants.rs),
     // at a 2-minute block target: ~20 minutes. `min` leaves 10% for blocks running fast.

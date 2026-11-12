@@ -4,6 +4,7 @@
 //!   init                                     create the key file (never overwrites)
 //!   address                                  print the Ootle address, account and public key
 //!   status                                   current epoch and account balances
+//!   fund <utxo_commitment> <microtari> <fee>  move a stealth TARI UTXO sent to this key into its account
 //!   publish <wasm>                           publish the template
 //!   lock <template> <microtari> <unlock_epoch>  lock native TARI from this account for this key
 //!   claim <lock_component>                   claim a lock into this account
@@ -29,7 +30,7 @@ async fn main() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let submit = take_flag(&mut args, "--submit");
     let [network, command, rest @ ..] = args.as_slice() else {
-        bail!("usage: lockbox-cli <esmeralda|mainnet> <init|address|status|publish|lock|claim> [args] [--submit]");
+        bail!("usage: lockbox-cli <esmeralda|mainnet> <init|address|status|fund|publish|lock|claim> [args] [--submit]");
     };
     let network = parse_network(network)?;
     let key_path = key_path(network)?;
@@ -53,6 +54,11 @@ async fn main() -> Result<()> {
     let epoch = session.epoch;
     match (command.as_str(), rest) {
         ("status", []) => session.print_status(account).await?,
+        ("fund", [commitment, microtari, fee]) => {
+            session
+                .fund_from_stealth(address.clone(), public_key, account, commitment, microtari.parse()?, fee.parse()?, submit)
+                .await?
+        },
         ("publish", [wasm]) => session.publish(account, wasm, submit).await?,
         ("lock", [template, microtari, unlock_epoch]) => {
             let template = PublishedTemplateAddress::from_str(template)
