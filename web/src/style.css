@@ -112,6 +112,16 @@ button.copy { display: inline-flex; align-items: center; justify-content: center
 button.copy.copied { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
 button.copy .check-icon { width: 13px; height: 13px; flex: none; animation: pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
 @keyframes pop { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: none; } }
+/* Native select (kept for its keyboard and screen-reader behaviour) with the network menu's chevron. */
+select {
+  appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 42px;
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23a9abcb' stroke-width='1.8'/%3E%3C/svg%3E") no-repeat right 16px center / 11px 8px;
+}
+select:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+/* High-contrast modes keep the image's fixed colour, so fall back to the system arrow there. */
+@media (forced-colors: active) {
+  select { appearance: auto; -webkit-appearance: auto; background-image: none; padding-right: 14px; }
+}
 input[type="text"]:focus, input[type="datetime-local"]:focus, select:focus { border-color: var(--accent); }
 input::placeholder { color: color-mix(in srgb, var(--muted) 75%, var(--bg)); }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }

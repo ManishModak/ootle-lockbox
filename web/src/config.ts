@@ -62,3 +62,6 @@ export const DEFAULT_NETWORK: NetworkName = "esmeralda";
 export const MAX_MEMO_BYTES = 280;
 
 export const REPO_URL = "https://github.com/ManishModak/ootle-lockbox";
+
+/** A real mainnet lock (1 TARI, made from this app on 12 Nov 2026), linked from every home page. */
+export const EXAMPLE_PROOF = "#/mainnet/lock/component_2a6375b91108f62a5711ee263d7d7bfbd619e6642c58a59bf546f701723e5484";

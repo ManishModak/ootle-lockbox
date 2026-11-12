@@ -1,5 +1,5 @@
 /** Home: what Lockbox is, a lookup box, and the most recent locks on this network. */
-import { NETWORKS, REPO_URL, type NetConfig } from "../config";
+import { EXAMPLE_PROOF, NETWORKS, REPO_URL, type NetConfig } from "../config";
 import { currentEpoch, lockCreatedEvents } from "../indexer";
 import { loadLock, mapLimit, type LoadedLock } from "../lockdata";
 import { errorText, h, link, notice, reducedMotion, tableSkeleton } from "../ui";
@@ -48,10 +48,11 @@ export async function homeView(net: NetConfig, root: HTMLElement) {
   });
 
   const howItWorks = h("button", { type: "button", class: "ghost", onclick: () => document.getElementById("how")?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth" }) }, "How it works");
+  const example = h("p", { class: "small" }, h("a", { href: EXAMPLE_PROOF }, "See a real lock on mainnet →"));
   // Without the template here, the first action is the testnet, where both templates are published.
   const actions = net.lockboxTemplate
-    ? [h("div", { class: "row" }, link(net, "create", "Create a lock", "button"), howItWorks)]
-    : [notPublishedText(net, "Lockbox"), h("div", { class: "row" }, h("a", { href: `#/${TESTNET.name}`, class: "button" }, `Try on ${TESTNET.label}`), howItWorks)];
+    ? [h("div", { class: "row" }, link(net, "create", "Create a lock", "button"), howItWorks), example]
+    : [notPublishedText(net, "Lockbox"), h("div", { class: "row" }, h("a", { href: `#/${TESTNET.name}`, class: "button" }, `Try on ${TESTNET.label}`), howItWorks), example];
   root.append(
     h(
       "section",
